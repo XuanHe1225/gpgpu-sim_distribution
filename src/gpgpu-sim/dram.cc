@@ -31,6 +31,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "dram.h"
+#include "pnm_memory_events.h"
 #include "dram_sched.h"
 #include "gpu-misc.h"
 #include "gpu-sim.h"
@@ -567,6 +568,8 @@ bool dram_t::issue_col_command(int j) {
         rwq->set_min_length(m_config->CL);
       }
       rwq->push(bk[j]->mrq);
+      pnm_events::request("RD", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
+                           bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
       bk[j]->mrq->txbytes += m_config->dram_atom_size;
       CCDc = m_config->tCCD;
       bkgrp[grp]->CCDLc = m_config->tCCDL;
@@ -602,6 +605,8 @@ bool dram_t::issue_col_command(int j) {
           rwq->set_min_length(m_config->WL);
         }
         rwq->push(bk[j]->mrq);
+        pnm_events::request("WR", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
+                             bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
 
         bk[j]->mrq->txbytes += m_config->dram_atom_size;
         CCDc = m_config->tCCD;
@@ -648,6 +653,8 @@ bool dram_t::issue_row_command(int j) {
              bk[j]->curr_row);
 #endif
       // activate the row with current memory request
+      pnm_events::request("ACT", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
+                           bk[j]->mrq->data, "", 0, bk[j]->mrq->row, n_cmd);
       bk[j]->curr_row = bk[j]->mrq->row;
       bk[j]->state = BANK_ACTIVE;
       RRDc = m_config->tRRD;
@@ -668,6 +675,8 @@ bool dram_t::issue_row_command(int j) {
           (!bk[j]->RASc && !bk[j]->WTPc && !bk[j]->RTPc &&
            !bkgrp[grp]->RTPLc)) {
         // make the bank idle again
+        pnm_events::request("PRE", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
+                             bk[j]->mrq->data, "", 0, bk[j]->curr_row, n_cmd);
         bk[j]->state = BANK_IDLE;
         bk[j]->RPc = m_config->tRP;
         prio = (j + 1) % m_config->nbk;

@@ -31,6 +31,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "shader.h"
+#include "pnm_memory_events.h"
 #include <float.h>
 #include <limits.h>
 #include <string.h>
@@ -584,6 +585,9 @@ void shader_core_ctx::init_warps(unsigned cta_id, unsigned start_thread,
 
       m_warp[i]->init(start_pc, cta_id, i, active_threads, m_dynamic_warp_id,
                       kernel.get_streamID());
+      pnm_events::emit("warp_bind", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
+                       nullptr, m_sid, 0, 0, m_dynamic_warp_id, ctaid, i,
+                       active_threads.to_ullong(), nullptr, "kernel", kernel_id);
       ++m_dynamic_warp_id;
       m_not_completed += n_active;
       ++m_active_warps;
@@ -1069,6 +1073,8 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       m_warp[warp_id]->get_streamID());  // dynamic instruction information
   m_stats->shader_cycle_distro[2 + (*pipe_reg)->active_count()]++;
   func_exec_inst(**pipe_reg);
+  pnm_events::instruction("issue", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
+                          **pipe_reg, m_sid, true);
 
   // Add LDGSTS instructions into a buffer
   unsigned int ldgdepbar_id = m_warp[warp_id]->m_ldgdepbar_id;
@@ -2133,6 +2139,8 @@ void shader_core_ctx::unset_depbar(const warp_inst_t &inst) {
 }
 
 void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
+  pnm_events::instruction("complete", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
+                          inst, m_sid, false);
 #if 0
       printf("[warp_inst_complete] uid=%u core=%u warp=%u pc=%#x @ time=%llu \n",
              inst.get_uid(), m_sid, inst.warp_id(), inst.pc,  m_gpu->gpu_tot_sim_cycle +  m_gpu->gpu_sim_cycle);
