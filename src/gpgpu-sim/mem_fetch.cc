@@ -32,6 +32,14 @@
 #include "mem_latency_stat.h"
 #include "shader.h"
 #include "visualizer.h"
+#include "pnm_memory_events.h"
+#include "../../libcuda/gpgpu_context.h"
+#include "../gpgpusim_entrypoint.h"
+
+unsigned long long pnm_events::cycle(mem_fetch *mf) {
+  auto *gpu = mf->get_mem_config()->gpgpu_ctx->the_gpgpusim->g_the_gpu;
+  return gpu->gpu_sim_cycle + gpu->gpu_tot_sim_cycle;
+}
 
 unsigned mem_fetch::sm_next_mf_request_uid = 1;
 std::vector<void *> mem_fetch::s_free_list;
@@ -99,6 +107,8 @@ mem_fetch::mem_fetch(const mem_access_t &access, const warp_inst_t *inst,
     m_raw_addr.chip = m_original_mf->get_tlx_addr().chip;
     m_raw_addr.sub_partition = m_original_mf->get_tlx_addr().sub_partition;
   }
+  pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
+      m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
 }
 
 mem_fetch::mem_fetch(const mem_access_t &access,
@@ -146,9 +156,17 @@ mem_fetch::mem_fetch(const mem_access_t &access,
     m_raw_addr.chip = m_original_mf->get_tlx_addr().chip;
     m_raw_addr.sub_partition = m_original_mf->get_tlx_addr().sub_partition;
   }
+  pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
+      m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
 }
 
-mem_fetch::~mem_fetch() { m_status = MEM_FETCH_DELETED; }
+mem_fetch::~mem_fetch() {
+  if (pnm_events::sink())
+    pnm_events::emit("release", pnm_events::cycle(this), &get_inst(), get_sid(),
+                     get_request_uid(), 0, 0, get_addr(), get_data_size(),
+                     get_access_warp_mask().to_ullong(), &get_tlx_addr(), "", m_status);
+  m_status = MEM_FETCH_DELETED;
+}
 
 #define MF_TUP_BEGIN(X) static const char *Status_str[] = {
 #define MF_TUP(X) #X
@@ -180,6 +198,8 @@ void mem_fetch::print(FILE *fp, bool print_inst) const {
 
 void mem_fetch::set_status(enum mem_fetch_status status,
                            unsigned long long cycle) {
+  if (status != m_status)
+    pnm_events::request("status", cycle, this, Status_str[status]);
   m_status = status;
   m_status_change = cycle;
 }

@@ -31,6 +31,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "gpu-cache.h"
+#include "pnm_memory_events.h"
 #include <assert.h>
 #include <cstdint>
 #include "gpu-sim.h"
@@ -568,6 +569,11 @@ bool mshr_table::full(new_addr_type block_addr) const {
 
 /// Add or merge this access
 void mshr_table::add(new_addr_type block_addr, mem_fetch *mf) {
+  auto prior = m_data.find(block_addr);
+  if (prior != m_data.end() && !prior->second.m_list.empty()) {
+    if (pnm_events::sink())
+      pnm_events::request("merge", pnm_events::cycle(mf), mf, "mshr", prior->second.m_list.front()->get_request_uid(), block_addr);
+  }
   m_data[block_addr].m_list.push_back(mf);
   assert(m_data.size() <= m_num_entries);
   assert(m_data[block_addr].m_list.size() <= m_max_merged);

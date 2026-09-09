@@ -27,6 +27,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "dram_sched.h"
+#include "pnm_memory_events.h"
 #include "../abstract_hardware_model.h"
 #include "gpu-misc.h"
 #include "gpu-sim.h"
@@ -195,6 +196,8 @@ dram_req_t *frfcfs_scheduler::schedule(unsigned bank, unsigned curr_row) {
     m_num_pending--;
   }
 
+  pnm_events::request("schedule", m_dram->m_gpu->gpu_sim_cycle + m_dram->m_gpu->gpu_tot_sim_cycle,
+                       req->data, rowhit ? "row_hit" : "row_miss");
   return req;
 }
 

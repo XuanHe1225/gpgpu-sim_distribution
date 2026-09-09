@@ -46,6 +46,7 @@
 #include "gpu-sim.h"
 #include "histogram.h"
 #include "l2cache.h"
+#include "pnm_memory_events.h"
 #include "l2cache_trace.h"
 #include "mem_fetch.h"
 #include "mem_latency_stat.h"
@@ -620,6 +621,8 @@ void memory_sub_partition::cache_cycle(unsigned cycle) {
                               events);
         bool write_sent = was_write_sent(events);
         bool read_sent = was_read_sent(events);
+        pnm_events::request("l2", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
+                             mf, cache_request_status_str(status));
         MEM_SUBPART_DPRINTF("Probing L2 cache Address=%llx, status=%u\n",
                             mf->get_addr(), status);
 
