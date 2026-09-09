@@ -1470,6 +1470,8 @@ void gpgpu_sim::update_stats() {
   partiton_reqs_in_parallel_util = 0;
   gpu_sim_cycle_parition_util = 0;
   gpu_sim_insn = 0;
+  // The deadlock snapshot uses the same per-kernel counter epoch.
+  last_gpu_sim_insn = 0;
   m_total_cta_launched = 0;
   gpu_completed_cta = 0;
   gpu_occupancy = occupancy_stats();
