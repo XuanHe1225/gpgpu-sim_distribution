@@ -218,7 +218,6 @@ void mem_fetch::set_status(enum mem_fetch_status status,
   // Cache tag timestamps may include the memcpy replacement-order offset.
   // Residence observes elapsed core time; retain the original status timestamp
   // below for existing simulator accounting.
-  const auto observed_cycle = pnm_events::cycle(this);
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
     // Observe wall-clock residence without changing the caller's cache metadata.
     const auto observed_cycle = pnm_events::cycle(this);
