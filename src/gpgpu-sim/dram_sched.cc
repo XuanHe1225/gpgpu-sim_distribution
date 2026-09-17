@@ -1,3 +1,4 @@
+#include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2011, Tor M. Aamodt, Ali Bakhoda, George L. Yuan,
 // The University of British Columbia
 // All rights reserved.
@@ -257,5 +258,35 @@ void dram_t::scheduler_frfcfs() {
         break;
       }
     }
+  }
+}
+
+// Sample queue contents only on column-wait cycles, every 64 DRAM ticks.
+// "ready" means column-timing eligible on the currently active row. It does
+// not claim replacing an already-selected bank request is legal or desirable.
+void frfcfs_scheduler::observe_queue() const {
+  auto &q = pnm_paths::observations().queues[m_dram->id]; ++q.samples;
+  auto now = m_dram->m_gpu->global_cycle();
+  for (unsigned b = 0; b < m_config->nbk; ++b) {
+    const auto *bank = m_dram->bk[b];
+    unsigned group = m_dram->get_bankgrp_number(b);
+    auto observe = [&](const std::list<dram_req_t *> &requests) {
+      for (const auto *r : requests) {
+        ++q.queued;
+        q.age = std::max(q.age, pnm_paths::U(now - r->timestamp));
+        if (bank->state != BANK_ACTIVE || bank->curr_row != r->row) continue;
+        ++q.rowhit;
+        bool write = r->rw == WRITE;
+        bool ready = !m_dram->CCDc && !m_dram->bkgrp[group]->CCDLc && !m_dram->rwq->full() &&
+                     !(write ? bank->RCDWRc : bank->RCDc) && !(write ? m_dram->RTWc : m_dram->WTRc);
+        if (ready) {
+          ++q.ready;
+          if (bank->mrq) ++q.behind;
+          if (m_dram->rw != r->rw) ++q.opposite;
+        }
+      }
+    };
+    observe(m_queue[b]);
+    if (m_config->seperate_write_queue_enabled) observe(m_write_queue[b]);
   }
 }

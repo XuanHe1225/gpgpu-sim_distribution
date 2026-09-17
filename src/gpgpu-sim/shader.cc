@@ -1,3 +1,4 @@
+#include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, Ali Bakhoda,
 // George L. Yuan, Andrew Turner, Inderpreet Singh, Vijay Kandiah, Nikos
 // Hardavellas, Mahmoud Khairy, Junrui Pan, Timothy G. Rogers The University of
@@ -1079,6 +1080,16 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       active_mask, warp_id, m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
       m_warp[warp_id]->get_dynamic_warp_id(), sch_id,
       m_warp[warp_id]->get_streamID());  // dynamic instruction information
+  if (pnm_components::enabled()) {
+    const auto &inst = **pipe_reg;
+    auto cta = inst.get_cuda_cta_id();
+    bool fixed = inst.op == ALU_OP || inst.op == INTP_OP || inst.op == SP_OP ||
+                 inst.op == DP_OP || inst.op == SFU_OP || inst.op == TENSOR_CORE_OP ||
+                 inst.op >= SPEC_UNIT_START_ID;
+    if (fixed && !cta.x && !cta.y && !cta.z && !warp_id)
+      pnm_paths::observations().issue(inst.get_uid(), m_warp[warp_id]->get_kernel_info()->get_uid(),
+                                     inst.pc, m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
+  }
   m_stats->shader_cycle_distro[2 + (*pipe_reg)->active_count()]++;
   func_exec_inst(**pipe_reg);
   pnm_events::instruction("issue", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
@@ -2210,6 +2221,8 @@ void shader_core_ctx::writeback() {
 
     m_operand_collector->writeback(*pipe_reg);
     unsigned warp_id = pipe_reg->warp_id();
+    pnm_paths::observations().stage(pipe_reg->get_uid(), 4,
+                                   m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
     m_scoreboard->releaseRegisters(pipe_reg);
     m_warp[warp_id]->dec_inst_in_pipeline();
     warp_inst_complete(*pipe_reg);
@@ -2838,6 +2851,7 @@ void pipelined_simd_unit::cycle() {
         (active_insts_in_pipeline < m_pipeline_depth)) {
       unsigned ready_cycle = global_cycle + m_dispatch_reg->latency -
                              m_dispatch_reg->initiation_interval;
+      pnm_paths::observations().stage(m_dispatch_reg->get_uid(), 3, ready_cycle);
       m_pipeline.push_back({*m_dispatch_reg, ready_cycle});
       active_insts_in_pipeline++;
       m_dispatch_reg->clear();
@@ -2853,6 +2867,7 @@ void pipelined_simd_unit::issue(register_set &source_reg) {
       source_reg.get_ready(partition_issue, m_issue_reg_id);
   if (pnm_components::enabled()) {
     const warp_inst_t &inst = **ready_reg;
+    pnm_paths::observations().stage(inst.get_uid(), 2, m_core->get_gpu()->global_cycle());
     auto cta = inst.get_cuda_cta_id();
     auto gpu = m_core->get_gpu();
     pnm_components::clock(m_core->get_kernel()->name().c_str(),
@@ -3571,6 +3586,9 @@ void ldst_unit::cycle() {
 
   if (!done) {  // log stall types and return
     assert(rc_fail != NO_RC_FAIL);
+    if (pnm_components::enabled() && !pipe_reg.get_cuda_cta_id().x &&
+        !pipe_reg.get_cuda_cta_id().y && !pipe_reg.get_cuda_cta_id().z && !pipe_reg.warp_id())
+      ++pnm_paths::observations().lsu[{m_core->get_kernel()->get_uid(), m_sid, pipe_reg.pc, rc_fail}];
     m_stats->gpgpu_n_stall_shd_mem++;
     m_stats->gpu_stall_shd_mem_breakdown[type][rc_fail]++;
     return;
@@ -3907,6 +3925,7 @@ void shader_core_ctx::register_cta_thread_exit(unsigned cta_num,
   assert(m_cta_status[cta_num] > 0);
   m_cta_status[cta_num]--;
   if (!m_cta_status[cta_num]) {
+    pnm_paths::observations().cta_end(m_sid, cta_num, m_gpu->global_cycle());
     // Increment the completed CTAs
     m_stats->ctas_completed++;
     m_gpu->inc_completed_cta();
@@ -5297,6 +5316,7 @@ void opndcoll_rfu_t::dispatch_ready_cu() {
               m_shader->get_config()->warp_size);  // cu->get_active_count());
         }
       }
+      pnm_paths::observations().stage(cu->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
       cu->dispatch();
     }
   }
@@ -5968,6 +5988,7 @@ void opndcoll_simple_t::step() {
       }
       if (out->has_free(sub_core_model, reg_id)) {
         in->move_out_to(sub_core_model, reg_id, m_swap_buffer);
+        pnm_paths::observations().stage(m_swap_buffer->get_uid(), 1, m_shader->get_gpu()->global_cycle());
         out->move_in(sub_core_model, reg_id, m_swap_buffer);
       }
     }

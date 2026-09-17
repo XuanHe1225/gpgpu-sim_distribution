@@ -1,3 +1,4 @@
+#include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, George L. Yuan,
 // Ali Bakhoda, Andrew Turner, Ivan Sham, Vijay Kandiah, Nikos Hardavellas,
 // Mahmoud Khairy, Junrui Pan, Timothy G. Rogers
@@ -1713,6 +1714,7 @@ void gpgpu_sim::gpu_print_stat(unsigned long long streamID) {
   std::string kernel_info_str = executed_kernel_info_string();
   fprintf(statfout, "%s", kernel_info_str.c_str());
 
+  pnm_paths::observations().print();
   printf("kernel_stream_id = %llu\n", streamID);
 
   printf("gpu_sim_cycle = %lld\n", gpu_sim_cycle);
@@ -2132,6 +2134,9 @@ void shader_core_ctx::issue_block2core(kernel_info_t &kernel) {
   function_info *kernel_func_info = kernel.entry();
   symbol_table *symtab = kernel_func_info->get_symtab();
   unsigned ctaid = kernel.get_next_cta_id_single();
+  auto component_cta = kernel.get_next_cta_id();
+  pnm_paths::observations().cta_start(kernel.get_uid(), m_sid, free_cta_hw_id,
+      component_cta.x, component_cta.y, component_cta.z, m_gpu->global_cycle());
   checkpoint *g_checkpoint = new checkpoint();
   for (unsigned i = start_thread; i < end_thread; i++) {
     m_threadState[i].m_cta_id = free_cta_hw_id;

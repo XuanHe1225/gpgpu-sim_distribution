@@ -1,3 +1,4 @@
+#include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2011, Tor M. Aamodt
 // The University of British Columbia
 // All rights reserved.
@@ -161,6 +162,8 @@ mem_fetch::mem_fetch(const mem_access_t &access,
 }
 
 mem_fetch::~mem_fetch() {
+  if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0)
+    pnm_paths::observations().finish_request(get_request_uid(), pnm_events::cycle(this));
   if (pnm_events::sink())
     pnm_events::emit("release", pnm_events::cycle(this), &get_inst(), get_sid(),
                      get_request_uid(), 0, 0, get_addr(), get_data_size(),
@@ -198,6 +201,8 @@ void mem_fetch::print(FILE *fp, bool print_inst) const {
 
 void mem_fetch::set_status(enum mem_fetch_status status,
                            unsigned long long cycle) {
+  pnm_paths::observations().transition(get_request_uid(), get_sub_partition_id(), get_access_type(),
+                                      m_status, status, m_status_change, cycle);
   if (status != m_status)
     pnm_events::request("status", cycle, this, Status_str[status]);
   m_status = status;

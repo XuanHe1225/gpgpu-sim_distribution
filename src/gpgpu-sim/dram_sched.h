@@ -46,6 +46,7 @@ class frfcfs_scheduler {
   void data_collection(unsigned bank);
   dram_req_t *schedule(unsigned bank, unsigned curr_row);
   void print(FILE *fp);
+  void observe_queue() const;
   unsigned num_pending() const { return m_num_pending; }
   unsigned num_write_pending() const { return m_num_write_pending; }
 

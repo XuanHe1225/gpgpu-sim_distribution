@@ -534,6 +534,8 @@ void dram_t::cycle() {
       }
     }
     m_component.blocked(component_union, component_common, component_ready);
+    if (pnm_components::enabled() && m_frfcfs_scheduler && ((n_cmd + id) % 64 == 0))
+      m_frfcfs_scheduler->observe_queue();
   } else if (memory_pending_found)
     wasted_bw_row++;
   else if (!memory_pending_found)

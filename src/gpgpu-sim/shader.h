@@ -1357,6 +1357,7 @@ class opndcoll_rfu_t
     const op_t *get_operands() const { return m_src_op; }
     void dump(FILE *fp, const shader_core_ctx *shader) const;
 
+    unsigned long long instruction_uid() const { return m_warp->get_uid(); }
     unsigned get_warp_id() const { return m_warp_id; }
     unsigned get_active_count() const { return m_warp->active_count(); }
     const active_mask_t &get_active_mask() const {

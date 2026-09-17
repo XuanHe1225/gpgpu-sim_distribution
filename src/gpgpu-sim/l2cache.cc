@@ -1,3 +1,4 @@
+#include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Vijay Kandiah, Nikos Hardavellas,
 // Mahmoud Khairy, Junrui Pan, Timothy G. Rogers
 // The University of British Columbia, Northwestern University, Purdue
@@ -518,6 +519,14 @@ memory_sub_partition::~memory_sub_partition() {
 }
 
 void memory_sub_partition::cache_cycle(unsigned cycle) {
+  if (pnm_components::enabled() && (cycle + m_id) % pnm_paths::period == 0) {
+    unsigned mask = (!m_icnt_L2_queue->empty() ? 1 : 0) |
+                    (m_L2_icnt_queue->full() ? 2 : 0) |
+                    ((!m_config->m_L2_config.disabled() && !m_L2cache->data_port_free()) ? 4 : 0) |
+                    (m_L2_dram_queue->full() ? 8 : 0) |
+                    (!m_dram_L2_queue->empty() ? 16 : 0);
+    ++pnm_paths::observations().l2[m_id][mask];
+  }
   // L2 fill responses
   if (!m_config->m_L2_config.disabled()) {
     if (m_L2cache->access_ready() && !m_L2_icnt_queue->full()) {
