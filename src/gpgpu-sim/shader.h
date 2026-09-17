@@ -1371,7 +1371,8 @@ class opndcoll_rfu_t
     void init(unsigned n, unsigned num_banks, const core_config *config,
               opndcoll_base_t *rfu, bool m_sub_core_model, unsigned reg_id,
               unsigned num_banks_per_sched);
-    bool allocate(register_set *pipeline_reg, register_set *output_reg);
+    bool allocate(register_set *pipeline_reg, register_set *output_reg,
+                  bool partitioned = false);
 
     void collect_operand(unsigned op) { m_not_ready.reset(op); }
     unsigned get_num_operands() const { return m_warp->get_num_operands(); }
@@ -2288,6 +2289,7 @@ class shader_core_config : public core_config {
   bool pnm_sass_issue_stalls;
   bool pnm_simd_ready_boundary;
   bool pnm_collector_fair_dispatch;
+  bool pnm_collector_partitioned_allocation;
   bool gpgpu_dual_issue_diff_exec_units;
 
   // op collector

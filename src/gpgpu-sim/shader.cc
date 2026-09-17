@@ -5336,6 +5336,34 @@ void opndcoll_rfu_t::allocate_cu(unsigned port_num) {
       // find a free cu
       for (unsigned j = 0; j < inp.m_cu_sets.size(); j++) {
         std::vector<collector_unit_t> &cu_set = m_cus[inp.m_cu_sets[j]];
+        if (sub_core_model &&
+            m_shader->get_config()->pnm_collector_partitioned_allocation) {
+          // Input registers and collectors belong to independent sub-cores.
+          // A full collector set in one must not block another's input.
+          assert(cu_set.size() >= m_num_warp_scheds &&
+                 cu_set.size() % m_num_warp_scheds == 0);
+          unsigned per_sched = cu_set.size() / m_num_warp_scheds;
+          collector_unit_t *selected = nullptr;
+          warp_inst_t **oldest = nullptr;
+          for (unsigned sid = 0; sid < m_num_warp_scheds; ++sid) {
+            warp_inst_t **ready = inp.m_in[i]->get_ready(true, sid);
+            if (!ready) continue;
+            assert((*ready)->get_schd_id() == sid);
+            if (oldest && (*oldest)->get_uid() < (*ready)->get_uid()) continue;
+            for (unsigned k = sid * per_sched; k < (sid + 1) * per_sched; ++k) {
+              if (cu_set[k].is_free()) {
+                selected = &cu_set[k];
+                oldest = ready;
+                break;
+              }
+            }
+          }
+          if (selected && selected->allocate(inp.m_in[i], inp.m_out[i], true)) {
+            m_arbiter.add_read_requests(selected);
+            break;  // Preserve one allocation per input and port call.
+          }
+          continue;
+        }
         bool allocated = false;
         unsigned cuLowerBound = 0;
         unsigned cuUpperBound = cu_set.size();
@@ -5446,12 +5474,13 @@ void opndcoll_rfu_t::collector_unit_t::init(unsigned n, unsigned num_banks,
 }
 
 bool opndcoll_rfu_t::collector_unit_t::allocate(register_set *pipeline_reg_set,
-                                                register_set *output_reg_set) {
+                                                register_set *output_reg_set,
+                                                bool partitioned) {
   assert(m_free);
   assert(m_not_ready.none());
   m_free = false;
   m_output_register = output_reg_set;
-  warp_inst_t **pipeline_reg = pipeline_reg_set->get_ready();
+  warp_inst_t **pipeline_reg = pipeline_reg_set->get_ready(partitioned, m_reg_id);
   if ((pipeline_reg) and !((*pipeline_reg)->empty())) {
     m_warp_id = (*pipeline_reg)->warp_id();
     std::vector<int> prev_regs;  // remove duplicate regs within same instr
@@ -5474,7 +5503,7 @@ bool opndcoll_rfu_t::collector_unit_t::allocate(register_set *pipeline_reg_set,
         m_src_op[op] = op_t();
     }
     // move_warp(m_warp,*pipeline_reg);
-    pipeline_reg_set->move_out_to(m_warp);
+    pipeline_reg_set->move_out_to(partitioned, m_reg_id, m_warp);
     return true;
   }
   return false;
