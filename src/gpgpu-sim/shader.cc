@@ -2837,14 +2837,17 @@ pipelined_simd_unit::pipelined_simd_unit(register_set *result_port,
 
 void pipelined_simd_unit::cycle() {
   unsigned global_cycle = m_core->get_gpu()->global_cycle();
-  if (!m_pipeline.empty() && m_pipeline.front().ready_cycle <= global_cycle &&
-      m_result_port->has_free()) {
+  auto retire_ready = [&]() {
+    if (m_pipeline.empty() || m_pipeline.front().ready_cycle > global_cycle ||
+        !m_result_port->has_free()) return false;
     // head of pipeline is ready
     **m_result_port->get_free() = m_pipeline.front().inst;
     assert(active_insts_in_pipeline > 0);
     active_insts_in_pipeline--;
     m_pipeline.pop_front();
-  }
+    return true;
+  };
+  bool retired = retire_ready();
 
   if (!m_dispatch_reg->empty()) {
     if (!m_dispatch_reg->dispatch_delay() &&
@@ -2857,6 +2860,9 @@ void pipelined_simd_unit::cycle() {
       m_dispatch_reg->clear();
     }
   }
+  // A zero-length execution tail is already ready this tick. Preserve one
+  // output per unit per tick, FIFO order, and result-port backpressure.
+  if (m_config->pnm_simd_ready_boundary && !retired) retire_ready();
 }
 
 void pipelined_simd_unit::issue(register_set &source_reg) {

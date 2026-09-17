@@ -620,6 +620,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
                          "Max number of instructions that can be issued per "
                          "warp in one cycle by scheduler (either 1 or 2)",
                          "2");
+  option_parser_register(opp, "-pnm_simd_ready_boundary", OPT_BOOL,
+                         &pnm_simd_ready_boundary,
+                         "Emit zero-tail SIMD results on their ready cycle", "0");
   option_parser_register(opp, "-pnm_sass_issue_stalls", OPT_BOOL,
                          &pnm_sass_issue_stalls,
                          "Honor binary-bound SASS static issue intervals", "0");
