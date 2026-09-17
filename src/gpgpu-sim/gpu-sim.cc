@@ -623,6 +623,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-pnm_simd_ready_boundary", OPT_BOOL,
                          &pnm_simd_ready_boundary,
                          "Emit zero-tail SIMD results on their ready cycle", "0");
+  option_parser_register(opp, "-pnm_collector_fair_dispatch", OPT_BOOL,
+                         &pnm_collector_fair_dispatch,
+                         "Rotate all collector slots across fixed sub-cores", "0");
   option_parser_register(opp, "-pnm_sass_issue_stalls", OPT_BOOL,
                          &pnm_sass_issue_stalls,
                          "Honor binary-bound SASS static issue intervals", "0");

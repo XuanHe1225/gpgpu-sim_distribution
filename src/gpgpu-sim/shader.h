@@ -1404,9 +1404,11 @@ class opndcoll_rfu_t
       m_num_collectors = (*cus).size();
       m_next_cu = 0;
     }
-    void init(bool sub_core_model, unsigned num_warp_scheds) {
+    void init(bool sub_core_model, unsigned num_warp_scheds,
+              bool fair_dispatch = false) {
       m_sub_core_model = sub_core_model;
       m_num_warp_scheds = num_warp_scheds;
+      m_fair_dispatch = fair_dispatch;
     }
 
     collector_unit_t *find_ready() {
@@ -1417,6 +1419,16 @@ class opndcoll_rfu_t
           m_sub_core_model ? cusPerSched - (m_last_cu % cusPerSched) : 1;
       for (unsigned n = 0; n < m_num_collectors; n++) {
         unsigned c = (m_last_cu + n + rr_increment) % m_num_collectors;
+        if (m_sub_core_model && m_fair_dispatch) {
+          // Rotate schedulers first, then the slot within each scheduler.
+          // Restarting at slot zero of the next scheduler can indefinitely
+          // skip later slots when the first slots remain ready.
+          unsigned previous = (m_last_cu % cusPerSched) * m_num_warp_scheds +
+                              m_last_cu / cusPerSched;
+          unsigned next = (previous + n + 1) % m_num_collectors;
+          c = (next % m_num_warp_scheds) * cusPerSched +
+              next / m_num_warp_scheds;
+        }
         if ((*m_collector_units)[c].ready()) {
           m_last_cu = c;
           return &((*m_collector_units)[c]);
@@ -1432,6 +1444,7 @@ class opndcoll_rfu_t
     unsigned m_next_cu;  // for initialization
     bool m_sub_core_model;
     unsigned m_num_warp_scheds;
+    bool m_fair_dispatch;
   };
 
   // opndcoll_rfu_t data members
@@ -2274,6 +2287,7 @@ class shader_core_config : public core_config {
   int gpgpu_max_insn_issue_per_warp;
   bool pnm_sass_issue_stalls;
   bool pnm_simd_ready_boundary;
+  bool pnm_collector_fair_dispatch;
   bool gpgpu_dual_issue_diff_exec_units;
 
   // op collector
