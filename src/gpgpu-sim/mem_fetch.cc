@@ -110,6 +110,13 @@ mem_fetch::mem_fetch(const mem_access_t &access, const warp_inst_t *inst,
   }
   pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
       m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
+  if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
+    // Cache replacement clocks can include a synthetic memcpy prefill offset.
+    // Residence is measured from actual request birth on the core clock.
+    const auto observed_cycle = pnm_events::cycle(this);
+    pnm_paths::observations().transition(get_request_uid(), get_sub_partition_id(), get_access_type(),
+                                        m_status, m_status, observed_cycle, observed_cycle);
+  }
 }
 
 mem_fetch::mem_fetch(const mem_access_t &access,
@@ -159,6 +166,13 @@ mem_fetch::mem_fetch(const mem_access_t &access,
   }
   pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
       m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
+  if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
+    // Cache replacement clocks can include a synthetic memcpy prefill offset.
+    // Residence is measured from actual request birth on the core clock.
+    const auto observed_cycle = pnm_events::cycle(this);
+    pnm_paths::observations().transition(get_request_uid(), get_sub_partition_id(), get_access_type(),
+                                        m_status, m_status, observed_cycle, observed_cycle);
+  }
 }
 
 mem_fetch::~mem_fetch() {
@@ -201,8 +215,16 @@ void mem_fetch::print(FILE *fp, bool print_inst) const {
 
 void mem_fetch::set_status(enum mem_fetch_status status,
                            unsigned long long cycle) {
-  pnm_paths::observations().transition(get_request_uid(), get_sub_partition_id(), get_access_type(),
-                                      m_status, status, m_status_change, cycle);
+  // Cache tag timestamps may include the memcpy replacement-order offset.
+  // Residence observes elapsed core time; retain the original status timestamp
+  // below for existing simulator accounting.
+  const auto observed_cycle = pnm_events::cycle(this);
+  if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
+    // Observe wall-clock residence without changing the caller's cache metadata.
+    const auto observed_cycle = pnm_events::cycle(this);
+    pnm_paths::observations().transition(get_request_uid(), get_sub_partition_id(), get_access_type(),
+                                        m_status, status, observed_cycle, observed_cycle);
+  }
   if (status != m_status)
     pnm_events::request("status", cycle, this, Status_str[status]);
   m_status = status;
