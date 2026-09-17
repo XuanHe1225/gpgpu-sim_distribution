@@ -493,8 +493,21 @@ void dram_t::cycle() {
     util_bw++;
   else if (memory_pending_rw_found) {
     wasted_bw_col++;
+    unsigned component_union = 0, component_common = 31;
+    bool component_ready = false;
     for (unsigned j = 0; j < m_config->nbk; j++) {
       unsigned grp = get_bankgrp_number(j);
+      if (pnm_components::enabled() && bk[j]->mrq &&
+          bk[j]->curr_row == bk[j]->mrq->row && bk[j]->state == BANK_ACTIVE) {
+        bool write = bk[j]->mrq->rw == WRITE;
+        unsigned mask = (CCDc ? 1 : 0) |
+                        ((write ? bk[j]->RCDWRc : bk[j]->RCDc) ? 2 : 0) |
+                        (bkgrp[grp]->CCDLc ? 4 : 0) |
+                        ((write ? RTWc : WTRc) ? 8 : 0) | (rwq->full() ? 16 : 0);
+        component_union |= mask;
+        component_common &= mask;
+        component_ready |= mask == 0;
+      }
       // read
       if (bk[j]->mrq &&
           (((bk[j]->curr_row == bk[j]->mrq->row) && (bk[j]->mrq->rw == READ) &&
@@ -520,6 +533,7 @@ void dram_t::cycle() {
         if (!bkgrp[grp]->CCDLc && RTWc) RTWc_limit_alone++;
       }
     }
+    m_component.blocked(component_union, component_common, component_ready);
   } else if (memory_pending_found)
     wasted_bw_row++;
   else if (!memory_pending_found)
@@ -568,6 +582,7 @@ bool dram_t::issue_col_command(int j) {
         rwq->set_min_length(m_config->CL);
       }
       rwq->push(bk[j]->mrq);
+      m_component.command(false);
       pnm_events::request("RD", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
                            bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
       bk[j]->mrq->txbytes += m_config->dram_atom_size;
@@ -605,6 +620,7 @@ bool dram_t::issue_col_command(int j) {
           rwq->set_min_length(m_config->WL);
         }
         rwq->push(bk[j]->mrq);
+        m_component.command(true);
         pnm_events::request("WR", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
                              bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
 
@@ -776,6 +792,7 @@ void dram_t::print(FILE *simFile) const {
   printf("Issued_on_Two_Bus_Simul_Util = %.6f \n", (float)issued_two / n_cmd);
   printf("issued_two_Eff = %.6f \n", (float)issued_two / issued_total);
   printf("queue_avg = %.6f \n\n", (float)ave_mrqs / n_cmd);
+  m_component.print(id);
 
   fprintf(simFile, "\n");
   fprintf(simFile, "dram_util_bins:");

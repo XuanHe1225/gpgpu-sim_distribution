@@ -1343,6 +1343,16 @@ class baseline_cache : public cache_t {
   /// Pop next ready access (does not include accesses that "HIT")
   mem_fetch *next_access() { return m_mshrs.next_access(); }
   // flash invalidate all entries in cache
+  void component_dirty(unsigned long long &sectors, unsigned long long &bytes) const {
+    sectors = bytes = 0;
+    for (unsigned i = 0; i < m_tag_array->size(); ++i) {
+      auto block = m_tag_array->get_block(i);
+      if (block->is_modified_line()) {
+        sectors += block->get_dirty_sector_mask().count();
+        bytes += block->get_dirty_byte_mask().count();
+      }
+    }
+  }
   void flush() { m_tag_array->flush(); }
   void invalidate() { m_tag_array->invalidate(); }
   void print(FILE *fp, unsigned &accesses, unsigned &misses) const;

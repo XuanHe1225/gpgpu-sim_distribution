@@ -1000,6 +1000,13 @@ void memory_sub_partition::accumulate_L2cache_stats(
     class cache_stats &l2_stats) const {
   if (!m_config->m_L2_config.disabled()) {
     l2_stats += m_L2cache->get_stats();
+    if (pnm_components::enabled()) {
+      unsigned long long sectors, bytes;
+      m_L2cache->component_dirty(sectors, bytes);
+      std::printf("PNMS_COMPONENT_L2 %u %llu %llu %llu\n", m_id, sectors, bytes,
+                  (unsigned long long)m_request_tracker.size());
+    }
+
   }
 }
 

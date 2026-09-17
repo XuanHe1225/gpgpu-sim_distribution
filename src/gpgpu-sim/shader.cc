@@ -30,6 +30,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+#include "pnm_component_diagnostics.h"
 #include "shader.h"
 #include "pnm_memory_events.h"
 #include <float.h>
@@ -2843,6 +2844,15 @@ void pipelined_simd_unit::issue(register_set &source_reg) {
       m_config->sub_core_model && this->is_issue_partitioned();
   warp_inst_t **ready_reg =
       source_reg.get_ready(partition_issue, m_issue_reg_id);
+  if (pnm_components::enabled()) {
+    const warp_inst_t &inst = **ready_reg;
+    auto cta = inst.get_cuda_cta_id();
+    auto gpu = m_core->get_gpu();
+    pnm_components::clock(m_core->get_kernel()->name().c_str(),
+                          m_core->get_kernel()->get_uid(), cta.x, cta.y, cta.z,
+                          inst.warp_id(), inst.get_active_mask().to_ullong(),
+                          inst.pc, gpu->gpu_sim_cycle + gpu->gpu_tot_sim_cycle);
+  }
   m_core->incexecstat((*ready_reg));
   m_core->inc_warp_inst_count((*ready_reg));
   // source_reg.move_out_to(m_dispatch_reg);

@@ -33,6 +33,7 @@
 #ifndef DRAM_H
 #define DRAM_H
 
+#include "pnm_component_diagnostics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <zlib.h>
@@ -110,6 +111,7 @@ class mem_fetch;
 class memory_config;
 
 class dram_t {
+  pnm_components::Controller m_component;
  public:
   dram_t(unsigned int parition_id, const memory_config *config,
          class memory_stats_t *stats, class memory_partition_unit *mp,
