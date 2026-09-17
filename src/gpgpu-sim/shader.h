@@ -33,6 +33,8 @@
 #ifndef SHADER_H
 #define SHADER_H
 
+#include "pnm_sass_stalls.h"
+
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -177,6 +179,7 @@ class shd_warp_t {
             const std::bitset<MAX_WARP_SIZE> &active, unsigned dynamic_warp_id,
             unsigned long long streamID) {
     m_streamID = streamID;
+    m_sass_issue_window.reset();
     m_cta_id = cta_id;
     m_warp_id = wid;
     m_dynamic_warp_id = dynamic_warp_id;
@@ -228,6 +231,9 @@ class shd_warp_t {
 
   bool functional_done() const;
   bool waiting();  // not const due to membar
+  void record_sass_issue(unsigned long long cycle, unsigned stall) {
+    m_sass_issue_window.issued(cycle, stall);
+  }
   bool hardware_done() const;
 
   bool done_exit() const { return m_done_exit; }
@@ -477,6 +483,7 @@ class shd_warp_t {
 
   // NANOSLEEP support
   uint64_t m_nanosleep_until;  // cycle when sleep ends (0 = not sleeping)
+  pnm_sass::IssueWindow m_sass_issue_window;
 
   // TRYWAIT retry support
   unsigned m_trywait_retries;  // current retry count
@@ -2264,6 +2271,7 @@ class shader_core_config : public core_config {
 
   unsigned gpgpu_num_sched_per_core;
   int gpgpu_max_insn_issue_per_warp;
+  bool pnm_sass_issue_stalls;
   bool gpgpu_dual_issue_diff_exec_units;
 
   // op collector

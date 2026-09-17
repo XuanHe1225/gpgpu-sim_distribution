@@ -619,6 +619,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
                          "Max number of instructions that can be issued per "
                          "warp in one cycle by scheduler (either 1 or 2)",
                          "2");
+  option_parser_register(opp, "-pnm_sass_issue_stalls", OPT_BOOL,
+                         &pnm_sass_issue_stalls,
+                         "Honor binary-bound SASS static issue intervals", "0");
   option_parser_register(opp, "-gpgpu_dual_issue_diff_exec_units", OPT_BOOL,
                          &gpgpu_dual_issue_diff_exec_units,
                          "should dual issue use two different execution unit "

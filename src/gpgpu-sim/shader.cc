@@ -1065,6 +1065,13 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       pipe_reg_set.get_free(m_config->sub_core_model, sch_id);
   assert(pipe_reg);
 
+  if (m_config->pnm_sass_issue_stalls) {
+    unsigned stall = pnm_sass::controls().at(
+        m_warp[warp_id]->get_kernel_info()->name(), next_inst->pc);
+    m_warp[warp_id]->record_sass_issue(
+        m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle, stall);
+  }
+
   m_warp[warp_id]->ibuffer_free();
   assert(next_inst->valid());
   **pipe_reg = *next_inst;  // static instruction information
@@ -5039,6 +5046,8 @@ bool shd_warp_t::hardware_done() const {
 
 bool shd_warp_t::waiting() {
   bool waiting = false;
+  waiting |= !m_sass_issue_window.ready(
+      m_shader->get_gpu()->gpu_tot_sim_cycle + m_shader->get_gpu()->gpu_sim_cycle);
   // waiting to be initialized with a kernel
   waiting |= functional_done();
   // waiting for other warps in CTA to reach barrier
