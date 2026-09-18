@@ -20,6 +20,7 @@ struct Inst {
   U launch, pc, issued;
   std::array<U,9> times{};
   unsigned mask=0, outstanding=0;
+  bool completion_reported=false;
 };
 struct Reg { U uid, launch, pc, issued, released=0; bool pending=true; };
 struct Prepared {Reg producer; U consumer, prepared, arrived=0; unsigned reg,kind;};
@@ -133,12 +134,17 @@ struct Observations {
     auto key=std::make_pair(v.launch,v.pc);
     if(release_counts[key]++<16) register_samples.push_back({v.launch,v.pc,uid,reg,v.issued,cycle,cycle-v.issued});
     versions.erase(it);
+    if(!inst->second.outstanding && inst->second.completion_reported) finish(uid,cycle);
   }
   void finish(U uid,U cycle) {
     if(!pnm_components::enabled()) return;
     auto it=instructions.find(uid); if(it==instructions.end()) return;
-    const auto &v=it->second;
-    assert(!v.outstanding);
+    auto &v=it->second;
+    // Some upstream LD/ST paths report architectural completion before
+    // releasing outputs, or once per vector output. Observe both events
+    // without changing simulator order or hiding missing register releases.
+    v.completion_reported=true;
+    if(v.outstanding) return;
     U last=0; bool output=false;
     for(const auto &r:registers) if(r.second.uid==uid) {
       assert(!r.second.pending); last=std::max(last,r.second.released); output=true;
