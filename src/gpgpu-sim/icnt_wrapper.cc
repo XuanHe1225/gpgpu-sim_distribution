@@ -161,6 +161,9 @@ void icnt_reg_options(class OptionParser* opp) {
                          "64");
   option_parser_register(opp, "-icnt_subnets", OPT_UINT32,
                          &g_inct_config.subnets, "subnets", "2");
+  option_parser_register(opp, "-custom_icnt_round_robin", OPT_BOOL,
+                         &g_inct_config.custom_icnt_round_robin,
+                         "Include next eligible source in iSLIP round-robin priority", "0");
   option_parser_register(opp, "-icnt_arbiter_algo", OPT_UINT32,
                          &g_inct_config.arbiter_algo, "arbiter_algo", "1");
   option_parser_register(opp, "-icnt_verbose", OPT_UINT32,

@@ -44,6 +44,7 @@ enum Arbiteration_type {
 };
 
 struct inct_config {
+  bool custom_icnt_round_robin = false;
   // config for local interconnect
   unsigned in_buffer_limit;
   unsigned out_buffer_limit;
@@ -109,6 +110,7 @@ class xbar_router {
 
   unsigned grant_cycles;
   unsigned grant_cycles_count;
+  bool custom_icnt_round_robin;
 
   friend class LocalInterconnect;
 };

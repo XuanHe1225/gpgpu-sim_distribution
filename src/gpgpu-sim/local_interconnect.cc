@@ -47,6 +47,7 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
   total_nodes = n_shader + n_mem;
   verbose = m_localinct_config.verbose;
   grant_cycles = m_localinct_config.grant_cycles;
+  custom_icnt_round_robin = m_localinct_config.custom_icnt_round_robin;
   grant_cycles_count = m_localinct_config.grant_cycles;
   in_buffers.resize(total_nodes);
   out_buffers.resize(total_nodes);
@@ -226,8 +227,12 @@ void xbar_router::iSLIP_Advance() {
   for (auto dest : destination_set) {
     if (Has_Buffer_Out(dest, 1)) {
       unsigned start_node = next_node[dest];
-      auto it =
-          std::upper_bound(input_nodes.begin(), input_nodes.end(), start_node);
+      // next_node already stores winner + 1. Including that source prevents
+      // adjacent contenders from repeatedly skipping the next eligible grant.
+      // Keep the original path available for paired disabled regressions.
+      auto it = custom_icnt_round_robin
+          ? input_nodes.lower_bound(start_node)
+          : std::upper_bound(input_nodes.begin(), input_nodes.end(), start_node);
       for (unsigned j = 0; j < input_nodes.size(); j++, it++) {
         if (it == input_nodes.end()) {
           it = input_nodes.begin();
