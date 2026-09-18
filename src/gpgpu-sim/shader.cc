@@ -5285,7 +5285,8 @@ void opndcoll_rfu_t::init(unsigned num_banks, shader_core_ctx *shader) {
   }
   for (unsigned j = 0; j < m_dispatch_units.size(); j++) {
     m_dispatch_units[j].init(sub_core_model, m_num_warp_scheds,
-                            shader->get_config()->custom_collector_fair_dispatch);
+                            shader->get_config()->custom_collector_fair_dispatch,
+                            shader->get_config()->custom_collector_local_round_robin);
   }
   m_shader = shader;
   m_initialized = true;

@@ -623,6 +623,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-pnm_simd_ready_boundary", OPT_BOOL,
                          &pnm_simd_ready_boundary,
                          "Emit zero-tail SIMD results on their ready cycle", "0");
+  option_parser_register(opp, "-custom_collector_local_round_robin", OPT_BOOL,
+                         &custom_collector_local_round_robin,
+                         "Keep independent collector slot rotation per sub-core", "0");
   option_parser_register(opp, "-custom_collector_fair_dispatch", OPT_BOOL,
                          &custom_collector_fair_dispatch,
                          "Rotate all collector slots across fixed sub-cores", "0");

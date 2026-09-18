@@ -1407,16 +1407,35 @@ class opndcoll_rfu_t
       m_next_cu = 0;
     }
     void init(bool sub_core_model, unsigned num_warp_scheds,
-              bool fair_dispatch = false) {
+              bool fair_dispatch = false, bool local_round_robin = false) {
       m_sub_core_model = sub_core_model;
       m_num_warp_scheds = num_warp_scheds;
       m_fair_dispatch = fair_dispatch;
+      m_local_round_robin = local_round_robin;
+      if (sub_core_model) m_last_local.assign(num_warp_scheds, m_num_collectors / num_warp_scheds - 1);
     }
 
     collector_unit_t *find_ready() {
       // With sub-core enabled round robin starts with the next cu assigned to a
       // different sub-core than the one that dispatched last
       unsigned cusPerSched = m_num_collectors / m_num_warp_scheds;
+      if (m_sub_core_model && m_local_round_robin) {
+        // A blocked scheduler must not lose its local slot rotation to other
+        // schedulers. Select one eligible local slot, with unchanged ports.
+        unsigned previous_scheduler = m_last_cu / cusPerSched;
+        for (unsigned n = 1; n <= m_num_warp_scheds; ++n) {
+          unsigned sid = (previous_scheduler + n) % m_num_warp_scheds;
+          for (unsigned k = 1; k <= cusPerSched; ++k) {
+            unsigned local = (m_last_local[sid] + k) % cusPerSched;
+            unsigned c = sid * cusPerSched + local;
+            if ((*m_collector_units)[c].ready()) {
+              m_last_local[sid] = local; m_last_cu = c;
+              return &(*m_collector_units)[c];
+            }
+          }
+        }
+        return NULL;
+      }
       unsigned rr_increment =
           m_sub_core_model ? cusPerSched - (m_last_cu % cusPerSched) : 1;
       for (unsigned n = 0; n < m_num_collectors; n++) {
@@ -1447,6 +1466,8 @@ class opndcoll_rfu_t
     bool m_sub_core_model;
     unsigned m_num_warp_scheds;
     bool m_fair_dispatch;
+    bool m_local_round_robin;
+    std::vector<unsigned> m_last_local;
   };
 
   // opndcoll_rfu_t data members
@@ -2291,6 +2312,7 @@ class shader_core_config : public core_config {
   bool custom_scalar_result_forwarding;
   bool pnm_simd_ready_boundary;
   bool custom_collector_fair_dispatch;
+  bool custom_collector_local_round_robin;
   bool custom_collector_partitioned_allocation;
   bool gpgpu_dual_issue_diff_exec_units;
 
