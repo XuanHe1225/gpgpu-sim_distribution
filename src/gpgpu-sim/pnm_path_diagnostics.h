@@ -2,6 +2,7 @@
 #ifndef PNM_PATH_DIAGNOSTICS_H
 #define PNM_PATH_DIAGNOSTICS_H
 #include "pnm_component_diagnostics.h"
+#include "pnm_dependencies.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -84,6 +85,7 @@ struct Observations {
   }
   void print() {
     if (!pnm_components::enabled()) return;
+    pnm_dependencies::observations().print();
     std::printf("PNMS_PATH_VERSION 1 %llu\n", period);
     for (const auto &kv : pipes) {
       const auto &p = kv.second;

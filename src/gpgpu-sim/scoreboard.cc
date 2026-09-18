@@ -30,6 +30,7 @@
 #include "../cuda-sim/ptx_sim.h"
 #include "shader.h"
 #include "shader_trace.h"
+#include "pnm_dependencies.h"
 
 // Constructor
 Scoreboard::Scoreboard(unsigned sid, unsigned n_warps, class gpgpu_t* gpu)
@@ -70,6 +71,8 @@ void Scoreboard::reserveRegister(unsigned wid, unsigned regnum) {
 // Unmark register as write-pending
 void Scoreboard::releaseRegister(unsigned wid, unsigned regnum) {
   if (!(reg_table[wid].find(regnum) != reg_table[wid].end())) return;
+  pnm_dependencies::observations().release(m_sid, wid, regnum,
+      m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
   SHADER_DPRINTF(SCOREBOARD, "Release register - warp:%d, reg: %d\n", wid,
                  regnum);
   reg_table[wid].erase(regnum);
@@ -141,11 +144,15 @@ bool Scoreboard::checkCollision(unsigned wid, const class inst_t* inst) const {
   // Check for collision, get the intersection of reserved registers and
   // instruction registers
   std::unordered_set<int>::const_iterator it2;
+  bool collision = false;
   for (it2 = inst_regs.begin(); it2 != inst_regs.end(); it2++)
     if (reg_table[wid].find(*it2) != reg_table[wid].end()) {
-      return true;
+      if (!pnm_components::enabled()) return true;
+      pnm_dependencies::observations().blocked(m_sid, wid, *it2, inst->pc,
+          m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
+      collision = true;
     }
-  return false;
+  return collision;
 }
 
 bool Scoreboard::pendingWrites(unsigned wid) const {

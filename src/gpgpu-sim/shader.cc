@@ -1083,6 +1083,13 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
   if (pnm_components::enabled()) {
     const auto &inst = **pipe_reg;
     auto cta = inst.get_cuda_cta_id();
+    if (!cta.x && !cta.y && !cta.z && !warp_id) {
+      for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
+        if (inst.out[i] > 0)
+          pnm_dependencies::observations().reserve(m_sid, warp_id, inst.out[i],
+              m_warp[warp_id]->get_kernel_info()->get_uid(), inst.pc,
+              inst.get_uid(), m_gpu->global_cycle());
+    }
     bool fixed = inst.op == ALU_OP || inst.op == INTP_OP || inst.op == SP_OP ||
                  inst.op == DP_OP || inst.op == SFU_OP || inst.op == TENSOR_CORE_OP ||
                  inst.op >= SPEC_UNIT_START_ID;
