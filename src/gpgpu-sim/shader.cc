@@ -1084,6 +1084,17 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
     const auto &inst = **pipe_reg;
     auto cta = inst.get_cuda_cta_id();
     if (!cta.x && !cta.y && !cta.z && !warp_id) {
+      auto &timing = custom_timing::observations();
+      timing.issue(m_sid, warp_id, inst.get_uid(),
+          m_warp[warp_id]->get_kernel_info()->get_uid(), inst.pc, m_gpu->global_cycle());
+      for (unsigned i = 0; i < inst.incount; ++i)
+        if (inst.in[i] > 0) timing.consume(m_sid, warp_id, inst.in[i], inst.get_uid(), 1, m_gpu->global_cycle());
+      for (int reg : {inst.pred, inst.ar1, inst.ar2})
+        if (reg > 0) timing.consume(m_sid, warp_id, reg, inst.get_uid(), 1, m_gpu->global_cycle());
+      for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
+        if (inst.out[i] > 0) timing.consume(m_sid, warp_id, inst.out[i], inst.get_uid(), 2, m_gpu->global_cycle());
+      for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
+        if (inst.out[i] > 0) timing.reserve(m_sid, warp_id, inst.out[i], inst.get_uid());
       for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
         if (inst.out[i] > 0)
           pnm_dependencies::observations().reserve(m_sid, warp_id, inst.out[i],
@@ -2165,6 +2176,7 @@ void shader_core_ctx::unset_depbar(const warp_inst_t &inst) {
 }
 
 void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
+  custom_timing::observations().finish(inst.get_uid(), m_gpu->global_cycle());
   pnm_events::instruction("complete", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                           inst, m_sid, false);
 #if 0
@@ -2226,6 +2238,7 @@ void shader_core_ctx::writeback() {
      * no stalling).
      */
 
+    custom_timing::observations().mark(pipe_reg->get_uid(), 7, m_gpu->global_cycle());
     m_operand_collector->writeback(*pipe_reg);
     unsigned warp_id = pipe_reg->warp_id();
     pnm_paths::observations().stage(pipe_reg->get_uid(), 4,
@@ -2848,6 +2861,7 @@ void pipelined_simd_unit::cycle() {
     if (m_pipeline.empty() || m_pipeline.front().ready_cycle > global_cycle ||
         !m_result_port->has_free()) return false;
     // head of pipeline is ready
+    custom_timing::observations().mark(m_pipeline.front().inst.get_uid(), 6, global_cycle);
     **m_result_port->get_free() = m_pipeline.front().inst;
     assert(active_insts_in_pipeline > 0);
     active_insts_in_pipeline--;
@@ -2861,6 +2875,7 @@ void pipelined_simd_unit::cycle() {
         (active_insts_in_pipeline < m_pipeline_depth)) {
       unsigned ready_cycle = global_cycle + m_dispatch_reg->latency -
                              m_dispatch_reg->initiation_interval;
+      custom_timing::observations().mark(m_dispatch_reg->get_uid(), 5, ready_cycle);
       pnm_paths::observations().stage(m_dispatch_reg->get_uid(), 3, ready_cycle);
       m_pipeline.push_back({*m_dispatch_reg, ready_cycle});
       active_insts_in_pipeline++;
@@ -2880,6 +2895,7 @@ void pipelined_simd_unit::issue(register_set &source_reg) {
       source_reg.get_ready(partition_issue, m_issue_reg_id);
   if (pnm_components::enabled()) {
     const warp_inst_t &inst = **ready_reg;
+    custom_timing::observations().mark(inst.get_uid(), 4, m_core->get_gpu()->global_cycle());
     pnm_paths::observations().stage(inst.get_uid(), 2, m_core->get_gpu()->global_cycle());
     auto cta = inst.get_cuda_cta_id();
     auto gpu = m_core->get_gpu();
@@ -5347,7 +5363,8 @@ void opndcoll_rfu_t::dispatch_ready_cu() {
               m_shader->get_config()->warp_size);  // cu->get_active_count());
         }
       }
-      pnm_paths::observations().stage(cu->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
+      custom_timing::observations().mark(cu->instruction_uid(), 3, m_shader->get_gpu()->global_cycle());
+    pnm_paths::observations().stage(cu->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
       cu->dispatch();
     }
   }
@@ -5383,6 +5400,8 @@ void opndcoll_rfu_t::allocate_cu(unsigned port_num) {
             }
           }
           if (selected && selected->allocate(inp.m_in[i], inp.m_out[i], true)) {
+            custom_timing::observations().mark(selected->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
+            if (selected->operands_ready()) custom_timing::observations().mark(selected->instruction_uid(), 2, m_shader->get_gpu()->global_cycle());
             m_arbiter.add_read_requests(selected);
             break;  // Preserve one allocation per input and port call.
           }
@@ -5408,6 +5427,8 @@ void opndcoll_rfu_t::allocate_cu(unsigned port_num) {
           if (cu_set[k].is_free()) {
             collector_unit_t *cu = &cu_set[k];
             allocated = cu->allocate(inp.m_in[i], inp.m_out[i]);
+            custom_timing::observations().mark(cu->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
+            if (cu->operands_ready()) custom_timing::observations().mark(cu->instruction_uid(), 2, m_shader->get_gpu()->global_cycle());
             m_arbiter.add_read_requests(cu);
             break;
           }
@@ -5441,6 +5462,7 @@ void opndcoll_rfu_t::allocate_reads() {
     unsigned cu = op.get_oc_id();
     unsigned operand = op.get_operand();
     m_cu[cu]->collect_operand(operand);
+    if (m_cu[cu]->operands_ready()) custom_timing::observations().mark(m_cu[cu]->instruction_uid(), 2, m_shader->get_gpu()->global_cycle());
     if (m_shader->get_config()->gpgpu_clock_gated_reg_file) {
       unsigned active_count = 0;
       for (unsigned i = 0; i < m_shader->get_config()->warp_size;

@@ -1354,6 +1354,7 @@ class opndcoll_rfu_t
     }
     // accessors
     bool ready() const;
+    bool operands_ready() const { return !m_free && m_not_ready.none(); }
     const op_t *get_operands() const { return m_src_op; }
     void dump(FILE *fp, const shader_core_ctx *shader) const;
 

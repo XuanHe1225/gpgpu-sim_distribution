@@ -31,6 +31,7 @@
 #include "shader.h"
 #include "shader_trace.h"
 #include "pnm_dependencies.h"
+#include "custom_execution_timing.h"
 
 // Constructor
 Scoreboard::Scoreboard(unsigned sid, unsigned n_warps, class gpgpu_t* gpu)
@@ -71,6 +72,7 @@ void Scoreboard::reserveRegister(unsigned wid, unsigned regnum) {
 // Unmark register as write-pending
 void Scoreboard::releaseRegister(unsigned wid, unsigned regnum) {
   if (!(reg_table[wid].find(regnum) != reg_table[wid].end())) return;
+  custom_timing::observations().release(m_sid, wid, regnum, (m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle));
   pnm_dependencies::observations().release(m_sid, wid, regnum,
       m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
   SHADER_DPRINTF(SCOREBOARD, "Release register - warp:%d, reg: %d\n", wid,
@@ -150,6 +152,12 @@ bool Scoreboard::checkCollision(unsigned wid, const class inst_t* inst) const {
       if (!pnm_components::enabled()) return true;
       pnm_dependencies::observations().blocked(m_sid, wid, *it2, inst->pc,
           m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
+      for (unsigned i=0; i<inst->incount; ++i)
+        if (inst->in[i] == unsigned(*it2)) custom_timing::observations().blocked(m_sid, wid, *it2, inst->pc, 1, (m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle));
+      if (inst->pred == *it2 || inst->ar1 == *it2 || inst->ar2 == *it2)
+        custom_timing::observations().blocked(m_sid, wid, *it2, inst->pc, 1, (m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle));
+      for (unsigned i=0; i<inst->outcount; ++i)
+        if (inst->out[i] == unsigned(*it2)) custom_timing::observations().blocked(m_sid, wid, *it2, inst->pc, 2, (m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle));
       collision = true;
     }
   return collision;
