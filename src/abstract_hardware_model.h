@@ -667,6 +667,8 @@ class kernel_info_t {
   unsigned m_launch_latency;
 
   mutable bool cache_config_set;
+  int measured_shared_carveout = -1;
+  unsigned measured_shared_per_cta = 0;
 
   unsigned m_kernel_TB_latency;  // this used for any CPU-GPU kernel latency and
                                  // counted in the gpu_cycle

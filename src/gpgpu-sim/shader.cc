@@ -4454,6 +4454,8 @@ void shader_core_ctx::display_pipeline(FILE *fout, int print_mem,
   }
 }
 
+#include "pnm_carveout.h"
+
 unsigned int shader_core_config::max_cta(const kernel_info_t &k) const {
   unsigned threads_per_cta = k.threads_per_cta();
   const class function_info *kernel = k.entry();
@@ -4470,6 +4472,13 @@ unsigned int shader_core_config::max_cta(const kernel_info_t &k) const {
   unsigned int result_shmem = (unsigned)-1;
   if (kernel_info->smem > 0)
     result_shmem = gpgpu_shmem_size / kernel_info->smem;
+  if (k.measured_shared_carveout >= 0) {
+    if (!adaptive_cache_config ||
+        static_cast<unsigned>(k.measured_shared_carveout) > gpgpu_shmem_size)
+      throw std::runtime_error("measured carveout requires compatible adaptive cache");
+    if (k.measured_shared_per_cta)
+      result_shmem = k.measured_shared_carveout / k.measured_shared_per_cta;
+  }
 
   // Limit by register count, rounded up to multiple of 4.
   unsigned int result_regs = (unsigned)-1;
@@ -4530,9 +4539,17 @@ unsigned int shader_core_config::max_cta(const kernel_info_t &k) const {
     bool l1d_configured = false;
     unsigned max_assoc = m_L1D_config.get_max_assoc();
 
+    if (k.measured_shared_carveout >= 0) {
+      total_shmem = k.measured_shared_carveout;
+      m_L1D_config.set_assoc(pnm_carveout::associativity(total_shmem, total_unified, max_assoc));
+      l1d_configured = true;
+      printf("PNMS_CARVEOUT %u %s %u %u %u %u\n", k.get_uid(), k.name().c_str(),
+             total_shmem, k.measured_shared_per_cta, total_unified - total_shmem,
+             pnm_carveout::associativity(total_shmem, total_unified, max_assoc));
+    }
     for (std::vector<unsigned>::const_iterator it = shmem_opt_list.begin();
          it < shmem_opt_list.end(); it++) {
-      if (total_shmem <= *it) {
+      if (!l1d_configured && total_shmem <= *it) {
         float l1_ratio = 1 - ((float)*(it) / total_unified);
         // make sure the ratio is between 0 and 1
         assert(0 <= l1_ratio && l1_ratio <= 1);
