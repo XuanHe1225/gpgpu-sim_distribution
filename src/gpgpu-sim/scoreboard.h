@@ -43,7 +43,8 @@ class Scoreboard {
  public:
   Scoreboard(unsigned sid, unsigned n_warps, class gpgpu_t *gpu);
 
-  void reserveRegisters(const warp_inst_t *inst);
+  void reserveRegisters(const warp_inst_t *inst, bool overlap=false);
+  std::set<unsigned> collisions(unsigned wid,const inst_t *inst) const;
   void releaseRegisters(const warp_inst_t *inst);
   void forwardResult(const warp_inst_t *inst);
   void releaseRegister(unsigned wid, unsigned regnum);
@@ -68,6 +69,7 @@ class Scoreboard {
   // Results in EX_WB remain pending for completion, but no longer block
   // dependent issue. UID ownership prevents old writeback releasing a newer WAW.
   std::map<unsigned, std::set<unsigned>> custom_forwarded;
+  std::map<std::pair<unsigned,unsigned>,unsigned long long> custom_owners;
   class gpgpu_t *m_gpu;
 };
 

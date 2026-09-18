@@ -78,16 +78,19 @@ void Scoreboard::releaseRegister(unsigned wid, unsigned regnum) {
   SHADER_DPRINTF(SCOREBOARD, "Release register - warp:%d, reg: %d\n", wid,
                  regnum);
   reg_table[wid].erase(regnum);
+  custom_owners.erase({wid,regnum});
 }
 
 const bool Scoreboard::islongop(unsigned warp_id, unsigned regnum) {
   return longopregs[warp_id].find(regnum) != longopregs[warp_id].end();
 }
 
-void Scoreboard::reserveRegisters(const class warp_inst_t* inst) {
+void Scoreboard::reserveRegisters(const class warp_inst_t* inst, bool overlap) {
   for (unsigned r = 0; r < MAX_OUTPUT_VALUES; r++) {
     if (inst->out[r] > 0) {
-      reserveRegister(inst->warp_id(), inst->out[r]);
+      if(overlap) reg_table[inst->warp_id()].insert(inst->out[r]);
+      else reserveRegister(inst->warp_id(), inst->out[r]);
+      custom_owners[{inst->warp_id(),inst->out[r]}]=inst->get_uid();
       SHADER_DPRINTF(SCOREBOARD, "Reserved register - warp:%d, reg: %d\n",
                      inst->warp_id(), inst->out[r]);
     }
@@ -132,6 +135,13 @@ void Scoreboard::releaseRegisters(const class warp_inst_t* inst) {
     if (inst->out[r] > 0) {
       SHADER_DPRINTF(SCOREBOARD, "Register Released - warp:%d, reg: %d\n",
                      inst->warp_id(), inst->out[r]);
+      auto owner=custom_owners.find({inst->warp_id(),inst->out[r]});
+      if(owner!=custom_owners.end() && owner->second!=inst->get_uid()) {
+        auto cycle=m_gpu->gpu_tot_sim_cycle+m_gpu->gpu_sim_cycle;
+        custom_timing::observations().release_uid(m_sid,inst->warp_id(),inst->out[r],inst->get_uid(),cycle);
+        pnm_dependencies::observations().release_uid(m_sid,inst->warp_id(),inst->out[r],inst->get_uid(),cycle);
+        continue;
+      }
       releaseRegister(inst->warp_id(), inst->out[r]);
       longopregs[inst->warp_id()].erase(inst->out[r]);
     }
@@ -181,4 +191,13 @@ bool Scoreboard::checkCollision(unsigned wid, const class inst_t* inst) const {
 
 bool Scoreboard::pendingWrites(unsigned wid) const {
   return !reg_table[wid].empty() || custom_forwarded.count(wid);
+}
+
+std::set<unsigned> Scoreboard::collisions(unsigned wid,const inst_t *inst) const {
+  std::set<unsigned> result;
+  auto add=[&](unsigned r){if(r && reg_table[wid].count(r)) result.insert(r);};
+  for(unsigned i=0;i<inst->incount;++i) add(inst->in[i]);
+  for(unsigned i=0;i<inst->outcount;++i) add(inst->out[i]);
+  add(inst->pred);add(inst->ar1);add(inst->ar2);
+  return result;
 }

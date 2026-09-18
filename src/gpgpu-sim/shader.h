@@ -1,3 +1,4 @@
+#include "custom_scalar_overlap.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, Andrew Turner,
 // Ali Bakhoda, Vijay Kandiah, Nikos Hardavellas,
 // Mahmoud Khairy, Junrui Pan, Timothy G. Rogers
@@ -2310,6 +2311,7 @@ class shader_core_config : public core_config {
   int gpgpu_max_insn_issue_per_warp;
   bool custom_sass_issue_stalls;
   bool custom_scalar_result_forwarding;
+  bool custom_scalar_operand_overlap;
   bool pnm_simd_ready_boundary;
   bool custom_collector_fair_dispatch;
   bool custom_collector_local_round_robin;
@@ -3148,6 +3150,14 @@ class shader_core_ctx : public core_t {
   bool check_if_non_released_reduction_barrier(warp_inst_t &inst);
 
   void custom_forward_scalar_result(const warp_inst_t &inst);
+  virtual bool custom_trace_overlap_capable() const {return false;}
+  bool custom_overlap_enabled() const {
+    return m_config->custom_scalar_operand_overlap &&
+           m_config->custom_scalar_result_forwarding && custom_trace_overlap_capable();
+  }
+  custom_overlap::Descriptor custom_scalar_descriptor(const warp_inst_t &inst,unsigned wid,const active_mask_t &mask) const;
+  bool custom_can_prepare(unsigned wid,const warp_inst_t *inst,const active_mask_t &mask) const;
+  custom_overlap::Tracker custom_scalar_tracker;
   shader_core_stats *get_stats() const { return m_stats; }
 
  protected:

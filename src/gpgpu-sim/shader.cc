@@ -1080,6 +1080,22 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       active_mask, warp_id, m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
       m_warp[warp_id]->get_dynamic_warp_id(), sch_id,
       m_warp[warp_id]->get_streamID());  // dynamic instruction information
+  bool early=false;
+  if(custom_overlap_enabled()) {
+    auto &inst=**pipe_reg;
+    auto desc=custom_scalar_descriptor(inst,warp_id,active_mask);
+    if(desc.unit) {
+      auto pending=m_scoreboard->collisions(warp_id,&inst);
+      std::map<unsigned,custom_overlap::U> bindings;
+      if(!pending.empty()) {bindings=custom_scalar_tracker.bind(desc,pending);early=true;}
+      custom_scalar_tracker.issue(inst.get_uid(),desc,bindings);
+      // Only pending producer-bound operands bypass RF. All independent reads
+      // still arbitrate the existing collector banks and ports.
+      for(unsigned i=0;i<MAX_REG_OPERANDS;++i)
+        if(inst.arch_reg.src[i]>=0 && custom_scalar_tracker.bypasses(inst.get_uid(),inst.arch_reg.src[i]))
+          inst.arch_reg.src[i]=-1;
+    }
+  }
   if (pnm_components::enabled()) {
     const auto &inst = **pipe_reg;
     auto cta = inst.get_cuda_cta_id();
@@ -1090,18 +1106,18 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       timing.issue(m_sid, warp_id, inst.get_uid(),
           m_warp[warp_id]->get_kernel_info()->get_uid(), inst.pc, m_gpu->global_cycle());
       for (unsigned i = 0; i < inst.incount; ++i)
-        if (inst.in[i] > 0) timing.consume(m_sid, warp_id, inst.in[i], inst.get_uid(), 1, m_gpu->global_cycle());
+        if (inst.in[i] > 0) timing.consume(m_sid, warp_id, inst.in[i], inst.get_uid(), 1, m_gpu->global_cycle(), early);
       for (int reg : {inst.pred, inst.ar1, inst.ar2})
-        if (reg > 0) timing.consume(m_sid, warp_id, reg, inst.get_uid(), 1, m_gpu->global_cycle());
+        if (reg > 0) timing.consume(m_sid, warp_id, reg, inst.get_uid(), 1, m_gpu->global_cycle(), early);
       for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
-        if (inst.out[i] > 0) timing.consume(m_sid, warp_id, inst.out[i], inst.get_uid(), 2, m_gpu->global_cycle());
+        if (inst.out[i] > 0) timing.consume(m_sid, warp_id, inst.out[i], inst.get_uid(), 2, m_gpu->global_cycle(), early);
       for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
-        if (inst.out[i] > 0) timing.reserve(m_sid, warp_id, inst.out[i], inst.get_uid());
+        if (inst.out[i] > 0) timing.reserve(m_sid, warp_id, inst.out[i], inst.get_uid(), early);
       for (unsigned i = 0; i < MAX_OUTPUT_VALUES; ++i)
         if (inst.out[i] > 0)
           pnm_dependencies::observations().reserve(m_sid, warp_id, inst.out[i],
               m_warp[warp_id]->get_kernel_info()->get_uid(), inst.pc,
-              inst.get_uid(), m_gpu->global_cycle());
+              inst.get_uid(), m_gpu->global_cycle(), early);
     }
     bool fixed = inst.op == ALU_OP || inst.op == INTP_OP || inst.op == SP_OP ||
                  inst.op == DP_OP || inst.op == SFU_OP || inst.op == TENSOR_CORE_OP ||
@@ -1308,7 +1324,7 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
 
   updateSIMTStack(warp_id, *pipe_reg);
 
-  m_scoreboard->reserveRegisters(*pipe_reg);
+  m_scoreboard->reserveRegisters(*pipe_reg,early);
   m_warp[warp_id]->set_next_pc(next_inst->pc + next_inst->isize);
 }
 
@@ -1594,7 +1610,9 @@ void scheduler_unit::cycle() {
           warp(warp_id).ibuffer_flush();
         } else {
           valid_inst = true;
-          if (!m_scoreboard->checkCollision(warp_id, pI)) {
+          if ((!m_shader->custom_overlap_enabled() || !m_shader->custom_scalar_tracker.blocked(warp_id)) &&
+              (!m_scoreboard->checkCollision(warp_id, pI) ||
+               m_shader->custom_can_prepare(warp_id,pI,m_shader->get_active_mask(warp_id,pI)))) {
             SCHED_DPRINTF(
                 "Warp (warp_id %u, dynamic_warp_id %u) passes scoreboard\n",
                 (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
@@ -2092,6 +2110,7 @@ void shader_core_ctx::execute() {
     }
     warp_inst_t **ready_reg = issue_inst.get_ready(partition_issue, reg_id);
     if (issue_inst.has_ready(partition_issue, reg_id) &&
+        (!custom_overlap_enabled() || custom_scalar_tracker.ready((*ready_reg)->get_uid())) &&
         m_fu[n]->can_issue(**ready_reg)) {
       bool schedule_wb_now = !m_fu[n]->stallable();
       int resbus = -1;
@@ -2099,8 +2118,10 @@ void shader_core_ctx::execute() {
           (resbus = test_res_bus((*ready_reg)->latency)) != -1) {
         assert((*ready_reg)->latency < MAX_ALU_LATENCY);
         m_result_bus[resbus]->set((*ready_reg)->latency);
+        if(custom_overlap_enabled()) custom_scalar_tracker.enter((*ready_reg)->get_uid());
         m_fu[n]->issue(issue_inst);
       } else if (!schedule_wb_now) {
+        if(custom_overlap_enabled()) custom_scalar_tracker.enter((*ready_reg)->get_uid());
         m_fu[n]->issue(issue_inst);
       } else {
         // stall issue (cannot reserve result bus)
@@ -2202,7 +2223,26 @@ void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
   inst.completed(m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
 }
 
+custom_overlap::Descriptor shader_core_ctx::custom_scalar_descriptor(
+    const warp_inst_t &inst,unsigned wid,const active_mask_t &mask) const {
+  custom_overlap::Descriptor d;d.warp=wid;d.mask=mask.to_ullong();
+  if(inst.op==ALU_OP || inst.op==INTP_OP) d.unit=m_config->gpgpu_num_int_units?1:2;
+  else if(inst.op==SP_OP) d.unit=2;
+  else if(inst.op==DP_OP) d.unit=3;
+  // Implicit predicate/address dependencies are not scalar forwarding operands.
+  if(inst.pred>0 || inst.ar1>0 || inst.ar2>0) d.unit=0;
+  for(unsigned i=0;i<inst.incount;++i) if(inst.in[i]) d.sources.insert(inst.in[i]);
+  for(unsigned i=0;i<inst.outcount;++i) if(inst.out[i]) d.outputs.insert(inst.out[i]);
+  return d;
+}
+
+bool shader_core_ctx::custom_can_prepare(unsigned wid,const warp_inst_t *inst,const active_mask_t &mask) const {
+  return custom_overlap_enabled() && custom_scalar_tracker.eligible(
+      custom_scalar_descriptor(*inst,wid,mask),m_scoreboard->collisions(wid,inst));
+}
+
 void shader_core_ctx::custom_forward_scalar_result(const warp_inst_t &inst) {
+  if(custom_overlap_enabled()) custom_scalar_tracker.arrive(inst.get_uid());
   if (m_config->custom_scalar_result_forwarding &&
       (inst.op == ALU_OP || inst.op == INTP_OP || inst.op == SP_OP || inst.op == DP_OP))
     m_scoreboard->forwardResult(&inst);

@@ -632,6 +632,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_collector_partitioned_allocation", OPT_BOOL,
                          &custom_collector_partitioned_allocation,
                          "Allocate oldest input with free sub-core collectors", "0");
+  option_parser_register(opp, "-custom_scalar_operand_overlap", OPT_BOOL,
+                         &custom_scalar_operand_overlap,
+                         "Trace scalar preparation before actual same-unit result arrival", "0");
   option_parser_register(opp, "-custom_scalar_result_forwarding", OPT_BOOL,
                          &custom_scalar_result_forwarding,
                          "Allow scalar dependent issue at actual result-port arrival", "0");

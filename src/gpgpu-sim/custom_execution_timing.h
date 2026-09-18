@@ -22,12 +22,18 @@ struct Inst {
   unsigned mask=0, outstanding=0;
 };
 struct Reg { U uid, launch, pc, issued, released=0; bool pending=true; };
+struct Prepared {Reg producer; U consumer, prepared, arrived=0; unsigned reg,kind;};
 struct Edge { Span issue, release; };
 struct Observations {
   std::map<std::tuple<U,U,U>,std::array<U,3>> barriers;
   std::map<U,Inst> instructions;
   std::map<std::tuple<unsigned,unsigned,unsigned>,Reg> registers;
   std::map<std::pair<unsigned,unsigned>,U> launches;
+  bool overlap=false;
+  std::map<std::pair<U,unsigned>,Reg> versions;
+  std::map<U,std::vector<Prepared>> preparations;
+  std::vector<std::array<U,11>> overlap_samples;
+  std::map<std::pair<U,U>,unsigned> overlap_counts;
   std::map<std::tuple<U,U,unsigned>,Span> events;
   std::map<std::tuple<U,U,U,U,unsigned>,Edge> edges;
   std::map<std::tuple<U,U,U,unsigned>,U> blocked_counts, last_blocked;
@@ -60,22 +66,41 @@ struct Observations {
     auto it=instructions.find(uid); if(it==instructions.end()) return;
     auto &v=it->second; assert(event<9 && cycle>=v.issued);
     if(v.mask&(1u<<event)) return;
+    if(event==4) {
+      auto deps=preparations.find(uid);
+      if(deps!=preparations.end()) {
+        for(const auto &d:deps->second) {
+          assert(d.arrived && cycle>=d.arrived);
+          if(overlap_counts[{v.launch,v.pc}]++<32)
+            overlap_samples.push_back({d.producer.launch,d.producer.pc,d.producer.uid,
+              v.launch,v.pc,uid,d.reg,d.kind,d.prepared,d.arrived,cycle});
+        }
+        preparations.erase(deps);
+      }
+    }
     v.mask|=1u<<event; v.times[event]=cycle;
     events[{v.launch,v.pc,event}].add(cycle-v.issued);
   }
-  void reserve(unsigned sid,unsigned wid,unsigned reg,U uid) {
+  void reserve(unsigned sid,unsigned wid,unsigned reg,U uid,bool early=false) {
     if(!pnm_components::enabled()) return;
     auto it=instructions.find(uid); if(it==instructions.end()) return;
     auto key=std::make_tuple(sid,wid,reg); auto old=registers.find(key);
-    assert(old==registers.end() || !old->second.pending);
+    assert(early || old==registers.end() || !old->second.pending);
     auto &v=it->second; ++v.outstanding;
     registers[key]=Reg{uid,v.launch,v.pc,v.issued};
+    assert(versions.emplace(std::make_pair(uid,reg),registers[key]).second);
   }
-  void consume(unsigned sid,unsigned wid,unsigned reg,U uid,unsigned kind,U cycle) {
+  void consume(unsigned sid,unsigned wid,unsigned reg,U uid,unsigned kind,U cycle,bool early=false) {
     if(!pnm_components::enabled()) return;
     auto c=instructions.find(uid); auto p=registers.find({sid,wid,reg});
     if(c==instructions.end() || p==registers.end() || p->second.launch!=c->second.launch) return;
     const auto &v=p->second;
+    if(v.pending && early) {
+      overlap=true;
+      if(consumed.emplace(uid,v.uid,kind).second)
+        preparations[uid].push_back(Prepared{v,uid,cycle,0,reg,kind});
+      return;
+    }
     assert(!v.pending && cycle>=v.released);
     if(!consumed.emplace(uid,v.uid,kind).second) return;
     auto &e=edges[{v.launch,v.pc,c->second.launch,c->second.pc,kind}];
@@ -90,16 +115,24 @@ struct Observations {
     last_blocked[key]=cycle;
   }
   void release(unsigned sid,unsigned wid,unsigned reg,U cycle) {
+    auto it=registers.find({sid,wid,reg});
+    if(it!=registers.end()) release_uid(sid,wid,reg,it->second.uid,cycle);
+  }
+  void release_uid(unsigned sid,unsigned wid,unsigned reg,U uid,U cycle) {
     if(!pnm_components::enabled()) return;
-    auto it=registers.find({sid,wid,reg}); if(it==registers.end() || !it->second.pending) return;
-    auto &v=it->second; assert(cycle>=v.issued); v.pending=false; v.released=cycle;
-    auto inst=instructions.find(v.uid);
-    if(inst!=instructions.end()) {
-      assert(inst->second.outstanding);
-      if(!--inst->second.outstanding) mark(v.uid,8,cycle);
-    }
+    auto it=versions.find({uid,reg});if(it==versions.end()) return;
+    auto v=it->second; assert(v.pending && cycle>=v.issued);
+    v.pending=false;v.released=cycle;
+    auto latest=registers.find({sid,wid,reg});
+    if(latest!=registers.end() && latest->second.uid==uid) latest->second=v;
+    auto inst=instructions.find(uid);
+    assert(inst!=instructions.end() && inst->second.outstanding);
+    if(!--inst->second.outstanding) mark(uid,8,cycle);
+    for(auto &consumer:preparations) for(auto &d:consumer.second)
+      if(d.producer.uid==uid && d.reg==reg) d.arrived=cycle;
     auto key=std::make_pair(v.launch,v.pc);
-    if(release_counts[key]++<16) register_samples.push_back({v.launch,v.pc,v.uid,reg,v.issued,cycle,cycle-v.issued});
+    if(release_counts[key]++<16) register_samples.push_back({v.launch,v.pc,uid,reg,v.issued,cycle,cycle-v.issued});
+    versions.erase(it);
   }
   void finish(U uid,U cycle) {
     if(!pnm_components::enabled()) return;
@@ -124,7 +157,7 @@ struct Observations {
   }
   void print() {
     if(!pnm_components::enabled()) return;
-    std::printf("CUSTOM_TIMING_VERSION 2\n");
+    std::printf("CUSTOM_TIMING_VERSION %u\n",overlap?3:2);
     for(const auto &b:barriers)
       std::printf("CUSTOM_TIMING_BARRIER %llu %llu %llu %llu %llu %llu\n",std::get<0>(b.first),std::get<1>(b.first),std::get<2>(b.first),b.second[0],b.second[1],b.second[2]);
     barriers.clear();
@@ -136,8 +169,10 @@ struct Observations {
       std::printf("CUSTOM_TIMING_BLOCKED %llu %llu %llu %u %llu\n",std::get<0>(kv.first),std::get<1>(kv.first),std::get<2>(kv.first),std::get<3>(kv.first),kv.second);
     for(const auto &s:samples) {std::printf("CUSTOM_TIMING_SAMPLE");for(U v:s)std::printf(" %llu",v);std::printf("\n");}
     for(const auto &s:register_samples) {std::printf("CUSTOM_TIMING_REGISTER");for(U v:s)std::printf(" %llu",v);std::printf("\n");}
+    for(const auto &s:overlap_samples) {std::printf("CUSTOM_TIMING_OVERLAP");for(U v:s)std::printf(" %llu",v);std::printf("\n");}
+    overlap_samples.clear();overlap_counts.clear();
     U pending=0;for(const auto &r:registers)pending+=r.second.pending;
-    std::printf("CUSTOM_TIMING_PENDING %llu %llu\n",U(instructions.size()),pending);
+    std::printf("CUSTOM_TIMING_PENDING %llu %llu\n",U(instructions.size()),U(versions.size()));
     events.clear();edges.clear();blocked_counts.clear();last_blocked.clear();samples.clear();register_samples.clear();sample_counts.clear();release_counts.clear();
     for(auto it=registers.begin();it!=registers.end();) {if(!it->second.pending)it=registers.erase(it);else ++it;}
   }

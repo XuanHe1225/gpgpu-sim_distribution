@@ -14,11 +14,15 @@ struct Result {
 struct Observations {
   std::map<std::tuple<unsigned, unsigned, unsigned>, Producer> registers;
   std::map<U, unsigned> outstanding;
+  std::map<std::pair<U,unsigned>,Producer> versions;
   std::map<std::tuple<U, U, U>, U> edges, last_cycle;
   std::map<std::pair<U, U>, Result> results;
-  void reserve(unsigned sid, unsigned wid, unsigned reg, U launch, U pc, U uid, U cycle) {
+  void reserve(unsigned sid, unsigned wid, unsigned reg, U launch, U pc, U uid, U cycle, bool early=false) {
     if (!pnm_components::enabled()) return;
-    assert(registers.emplace(std::make_tuple(sid, wid, reg), Producer{launch, pc, uid, cycle}).second);
+    auto key=std::make_tuple(sid,wid,reg);
+    assert(early || !registers.count(key));
+    registers[key]=Producer{launch,pc,uid,cycle};
+    assert(versions.emplace(std::make_pair(uid,reg),registers[key]).second);
     ++outstanding[uid];
   }
   void blocked(unsigned sid, unsigned wid, unsigned reg, U consumer, U cycle) {
@@ -30,20 +34,23 @@ struct Observations {
     if (last == last_cycle.end() || last->second != cycle) ++edges[key];
     last_cycle[key] = cycle;
   }
-  void release(unsigned sid, unsigned wid, unsigned reg, U cycle) {
-    if (!pnm_components::enabled()) return;
-    auto it = registers.find(std::make_tuple(sid, wid, reg));
-    if (it == registers.end()) return;
-    auto p = it->second;
-    assert(cycle >= p.issued && outstanding.at(p.uid));
-    if (!--outstanding[p.uid]) {
-      outstanding.erase(p.uid);
-      auto &r = results[{p.launch, p.pc}];
-      U elapsed = cycle - p.issued;
-      ++r.count; r.sum += elapsed;
-      r.min = std::min(r.min, elapsed); r.max = std::max(r.max, elapsed);
+  void release(unsigned sid,unsigned wid,unsigned reg,U cycle) {
+    auto it=registers.find({sid,wid,reg});
+    if(it!=registers.end()) release_uid(sid,wid,reg,it->second.uid,cycle);
+  }
+  void release_uid(unsigned sid,unsigned wid,unsigned reg,U uid,U cycle) {
+    if(!pnm_components::enabled()) return;
+    auto it=versions.find({uid,reg});if(it==versions.end()) return;
+    auto p=it->second;
+    assert(cycle>=p.issued && outstanding.at(uid));
+    if(!--outstanding[uid]) {
+      outstanding.erase(uid);auto &r=results[{p.launch,p.pc}];
+      U elapsed=cycle-p.issued;++r.count;r.sum+=elapsed;
+      r.min=std::min(r.min,elapsed);r.max=std::max(r.max,elapsed);
     }
-    registers.erase(it);
+    auto latest=registers.find({sid,wid,reg});
+    if(latest!=registers.end() && latest->second.uid==uid) registers.erase(latest);
+    versions.erase(it);
   }
   void print() {
     if (!pnm_components::enabled()) return;
@@ -56,7 +63,7 @@ struct Observations {
       std::printf("PNMS_DEP_RESULT %llu %llu %llu %llu %llu %llu\n",
                   item.first.first, item.first.second, r.count, r.sum, r.min, r.max);
     }
-    std::printf("PNMS_DEP_PENDING %llu %llu\n", U(registers.size()), U(outstanding.size()));
+    std::printf("PNMS_DEP_PENDING %llu %llu\n", U(versions.size()), U(outstanding.size()));
     edges.clear(); last_cycle.clear(); results.clear();
   }
 };
