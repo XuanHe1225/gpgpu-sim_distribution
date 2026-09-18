@@ -1066,7 +1066,7 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       pipe_reg_set.get_free(m_config->sub_core_model, sch_id);
   assert(pipe_reg);
 
-  if (m_config->pnm_sass_issue_stalls) {
+  if (m_config->custom_sass_issue_stalls) {
     unsigned stall = pnm_sass::controls().at(
         m_warp[warp_id]->get_kernel_info()->name(), next_inst->pc);
     m_warp[warp_id]->record_sass_issue(
@@ -5260,7 +5260,7 @@ void opndcoll_rfu_t::init(unsigned num_banks, shader_core_ctx *shader) {
   }
   for (unsigned j = 0; j < m_dispatch_units.size(); j++) {
     m_dispatch_units[j].init(sub_core_model, m_num_warp_scheds,
-                            shader->get_config()->pnm_collector_fair_dispatch);
+                            shader->get_config()->custom_collector_fair_dispatch);
   }
   m_shader = shader;
   m_initialized = true;
@@ -5361,7 +5361,7 @@ void opndcoll_rfu_t::allocate_cu(unsigned port_num) {
       for (unsigned j = 0; j < inp.m_cu_sets.size(); j++) {
         std::vector<collector_unit_t> &cu_set = m_cus[inp.m_cu_sets[j]];
         if (sub_core_model &&
-            m_shader->get_config()->pnm_collector_partitioned_allocation) {
+            m_shader->get_config()->custom_collector_partitioned_allocation) {
           // Input registers and collectors belong to independent sub-cores.
           // A full collector set in one must not block another's input.
           assert(cu_set.size() >= m_num_warp_scheds &&

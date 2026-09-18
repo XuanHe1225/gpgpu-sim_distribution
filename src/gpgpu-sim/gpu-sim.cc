@@ -623,14 +623,14 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-pnm_simd_ready_boundary", OPT_BOOL,
                          &pnm_simd_ready_boundary,
                          "Emit zero-tail SIMD results on their ready cycle", "0");
-  option_parser_register(opp, "-pnm_collector_fair_dispatch", OPT_BOOL,
-                         &pnm_collector_fair_dispatch,
+  option_parser_register(opp, "-custom_collector_fair_dispatch", OPT_BOOL,
+                         &custom_collector_fair_dispatch,
                          "Rotate all collector slots across fixed sub-cores", "0");
-  option_parser_register(opp, "-pnm_collector_partitioned_allocation", OPT_BOOL,
-                         &pnm_collector_partitioned_allocation,
+  option_parser_register(opp, "-custom_collector_partitioned_allocation", OPT_BOOL,
+                         &custom_collector_partitioned_allocation,
                          "Allocate oldest input with free sub-core collectors", "0");
-  option_parser_register(opp, "-pnm_sass_issue_stalls", OPT_BOOL,
-                         &pnm_sass_issue_stalls,
+  option_parser_register(opp, "-custom_sass_issue_stalls", OPT_BOOL,
+                         &custom_sass_issue_stalls,
                          "Honor binary-bound SASS static issue intervals", "0");
   option_parser_register(opp, "-gpgpu_dual_issue_diff_exec_units", OPT_BOOL,
                          &gpgpu_dual_issue_diff_exec_units,
