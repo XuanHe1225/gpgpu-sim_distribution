@@ -2200,6 +2200,12 @@ void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
   inst.completed(m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
 }
 
+void shader_core_ctx::custom_forward_scalar_result(const warp_inst_t &inst) {
+  if (m_config->custom_scalar_result_forwarding &&
+      (inst.op == ALU_OP || inst.op == INTP_OP || inst.op == SP_OP || inst.op == DP_OP))
+    m_scoreboard->forwardResult(&inst);
+}
+
 void shader_core_ctx::writeback() {
   unsigned max_committed_thread_instructions =
       m_config->warp_size *
@@ -2863,6 +2869,7 @@ void pipelined_simd_unit::cycle() {
     // head of pipeline is ready
     custom_timing::observations().mark(m_pipeline.front().inst.get_uid(), 6, global_cycle);
     **m_result_port->get_free() = m_pipeline.front().inst;
+    m_core->custom_forward_scalar_result(m_pipeline.front().inst);
     assert(active_insts_in_pipeline > 0);
     active_insts_in_pipeline--;
     m_pipeline.pop_front();

@@ -111,7 +111,20 @@ void Scoreboard::reserveRegisters(const class warp_inst_t* inst) {
 }
 
 // Release registers for an instruction
+void Scoreboard::forwardResult(const warp_inst_t* inst) {
+  // Called only after the result has acquired an actual EX_WB slot. Core
+  // writeback precedes next-cycle operand collection, so dependent reads do
+  // not precede the physical RF write. No prediction or FU shortening.
+  releaseRegisters(inst);
+  assert(custom_forwarded[inst->warp_id()].insert(inst->get_uid()).second);
+}
+
 void Scoreboard::releaseRegisters(const class warp_inst_t* inst) {
+  auto forwarded = custom_forwarded.find(inst->warp_id());
+  if (forwarded != custom_forwarded.end() && forwarded->second.erase(inst->get_uid())) {
+    if (forwarded->second.empty()) custom_forwarded.erase(forwarded);
+    return; // Old result must not release the younger instruction's reservation.
+  }
   for (unsigned r = 0; r < MAX_OUTPUT_VALUES; r++) {
     if (inst->out[r] > 0) {
       SHADER_DPRINTF(SCOREBOARD, "Register Released - warp:%d, reg: %d\n",
@@ -164,5 +177,5 @@ bool Scoreboard::checkCollision(unsigned wid, const class inst_t* inst) const {
 }
 
 bool Scoreboard::pendingWrites(unsigned wid) const {
-  return !reg_table[wid].empty();
+  return !reg_table[wid].empty() || custom_forwarded.count(wid);
 }

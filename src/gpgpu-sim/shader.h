@@ -2288,6 +2288,7 @@ class shader_core_config : public core_config {
   unsigned gpgpu_num_sched_per_core;
   int gpgpu_max_insn_issue_per_warp;
   bool custom_sass_issue_stalls;
+  bool custom_scalar_result_forwarding;
   bool pnm_simd_ready_boundary;
   bool custom_collector_fair_dispatch;
   bool custom_collector_partitioned_allocation;
@@ -3124,6 +3125,7 @@ class shader_core_ctx : public core_t {
   }
   bool check_if_non_released_reduction_barrier(warp_inst_t &inst);
 
+  void custom_forward_scalar_result(const warp_inst_t &inst);
   shader_core_stats *get_stats() const { return m_stats; }
 
  protected:

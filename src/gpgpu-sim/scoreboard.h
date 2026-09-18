@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <set>
+#include <map>
 #include <unordered_set>
 #include <vector>
 #include "assert.h"
@@ -44,6 +45,7 @@ class Scoreboard {
 
   void reserveRegisters(const warp_inst_t *inst);
   void releaseRegisters(const warp_inst_t *inst);
+  void forwardResult(const warp_inst_t *inst);
   void releaseRegister(unsigned wid, unsigned regnum);
 
   bool checkCollision(unsigned wid, const inst_t *inst) const;
@@ -63,6 +65,9 @@ class Scoreboard {
   // Register that depend on a long operation (global, local or tex memory)
   std::vector<std::set<unsigned> > longopregs;
 
+  // Results in EX_WB remain pending for completion, but no longer block
+  // dependent issue. UID ownership prevents old writeback releasing a newer WAW.
+  std::map<unsigned, std::set<unsigned>> custom_forwarded;
   class gpgpu_t *m_gpu;
 };
 

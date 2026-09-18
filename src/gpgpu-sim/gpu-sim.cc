@@ -629,6 +629,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_collector_partitioned_allocation", OPT_BOOL,
                          &custom_collector_partitioned_allocation,
                          "Allocate oldest input with free sub-core collectors", "0");
+  option_parser_register(opp, "-custom_scalar_result_forwarding", OPT_BOOL,
+                         &custom_scalar_result_forwarding,
+                         "Allow scalar dependent issue at actual result-port arrival", "0");
   option_parser_register(opp, "-custom_sass_issue_stalls", OPT_BOOL,
                          &custom_sass_issue_stalls,
                          "Honor binary-bound SASS static issue intervals", "0");

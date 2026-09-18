@@ -19,7 +19,7 @@ struct Span {
 struct Inst {
   U launch, pc, issued;
   std::array<U,9> times{};
-  unsigned mask=0;
+  unsigned mask=0, outstanding=0;
 };
 struct Reg { U uid, launch, pc, issued, released=0; bool pending=true; };
 struct Edge { Span issue, release; };
@@ -61,7 +61,7 @@ struct Observations {
     auto it=instructions.find(uid); if(it==instructions.end()) return;
     auto key=std::make_tuple(sid,wid,reg); auto old=registers.find(key);
     assert(old==registers.end() || !old->second.pending);
-    const auto &v=it->second;
+    auto &v=it->second; ++v.outstanding;
     registers[key]=Reg{uid,v.launch,v.pc,v.issued};
   }
   void consume(unsigned sid,unsigned wid,unsigned reg,U uid,unsigned kind,U cycle) {
@@ -86,6 +86,11 @@ struct Observations {
     if(!pnm_components::enabled()) return;
     auto it=registers.find({sid,wid,reg}); if(it==registers.end() || !it->second.pending) return;
     auto &v=it->second; assert(cycle>=v.issued); v.pending=false; v.released=cycle;
+    auto inst=instructions.find(v.uid);
+    if(inst!=instructions.end()) {
+      assert(inst->second.outstanding);
+      if(!--inst->second.outstanding) mark(v.uid,8,cycle);
+    }
     auto key=std::make_pair(v.launch,v.pc);
     if(release_counts[key]++<16) register_samples.push_back({v.launch,v.pc,v.uid,reg,v.issued,cycle,cycle-v.issued});
   }
@@ -93,6 +98,7 @@ struct Observations {
     if(!pnm_components::enabled()) return;
     auto it=instructions.find(uid); if(it==instructions.end()) return;
     const auto &v=it->second;
+    assert(!v.outstanding);
     U last=0; bool output=false;
     for(const auto &r:registers) if(r.second.uid==uid) {
       assert(!r.second.pending); last=std::max(last,r.second.released); output=true;
