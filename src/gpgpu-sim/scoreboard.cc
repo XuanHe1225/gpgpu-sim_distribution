@@ -112,6 +112,9 @@ void Scoreboard::reserveRegisters(const class warp_inst_t* inst) {
 
 // Release registers for an instruction
 void Scoreboard::forwardResult(const warp_inst_t* inst) {
+  bool writes_register = false;
+  for (unsigned r = 0; r < MAX_OUTPUT_VALUES; ++r) writes_register |= inst->out[r] > 0;
+  if (!writes_register) return; // NOP/branch cannot introduce a pending RF write.
   // Called only after the result has acquired an actual EX_WB slot. Core
   // writeback precedes next-cycle operand collection, so dependent reads do
   // not precede the physical RF write. No prediction or FU shortening.

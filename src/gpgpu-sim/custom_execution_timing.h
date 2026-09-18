@@ -24,6 +24,7 @@ struct Inst {
 struct Reg { U uid, launch, pc, issued, released=0; bool pending=true; };
 struct Edge { Span issue, release; };
 struct Observations {
+  std::map<std::tuple<U,U,U>,std::array<U,3>> barriers;
   std::map<U,Inst> instructions;
   std::map<std::tuple<unsigned,unsigned,unsigned>,Reg> registers;
   std::map<std::pair<unsigned,unsigned>,U> launches;
@@ -34,6 +35,12 @@ struct Observations {
   std::vector<std::array<U,13>> samples;
   std::vector<std::array<U,7>> register_samples;
   std::map<std::pair<U,U>,unsigned> sample_counts, release_counts;
+  void barrier(U launch,U warp,U pc,U cycle) {
+    if(!pnm_components::enabled()) return;
+    auto &b=barriers[{launch,warp,pc}];
+    if(!b[0]++) b[1]=cycle;
+    b[2]=cycle;
+  }
   void issue(unsigned sid,unsigned wid,U uid,U launch,U pc,U cycle) {
     if(!pnm_components::enabled()) return;
     auto key=std::make_pair(sid,wid); auto prior=launches.find(key);
@@ -117,7 +124,10 @@ struct Observations {
   }
   void print() {
     if(!pnm_components::enabled()) return;
-    std::printf("CUSTOM_TIMING_VERSION 1\n");
+    std::printf("CUSTOM_TIMING_VERSION 2\n");
+    for(const auto &b:barriers)
+      std::printf("CUSTOM_TIMING_BARRIER %llu %llu %llu %llu %llu %llu\n",std::get<0>(b.first),std::get<1>(b.first),std::get<2>(b.first),b.second[0],b.second[1],b.second[2]);
+    barriers.clear();
     for(const auto &kv:events) {const auto &s=kv.second;
       std::printf("CUSTOM_TIMING_EVENT %llu %llu %u %llu %llu %llu %llu\n",std::get<0>(kv.first),std::get<1>(kv.first),std::get<2>(kv.first),s.count,s.sum,s.min,s.max);}
     for(const auto &kv:edges) {const auto &e=kv.second;

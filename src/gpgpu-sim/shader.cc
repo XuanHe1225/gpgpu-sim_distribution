@@ -1083,6 +1083,8 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
   if (pnm_components::enabled()) {
     const auto &inst = **pipe_reg;
     auto cta = inst.get_cuda_cta_id();
+    if (!cta.x && !cta.y && !cta.z && inst.op == BARRIER_OP)
+      custom_timing::observations().barrier(m_warp[warp_id]->get_kernel_info()->get_uid(), warp_id, inst.pc, m_gpu->global_cycle());
     if (!cta.x && !cta.y && !cta.z && !warp_id) {
       auto &timing = custom_timing::observations();
       timing.issue(m_sid, warp_id, inst.get_uid(),
