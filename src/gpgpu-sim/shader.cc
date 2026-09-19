@@ -2459,6 +2459,7 @@ mem_stage_stall_type ldst_unit::process_memory_access_queue_l1cache(
         mf->get_addr(), mf,
         m_core->get_gpu()->gpu_sim_cycle + m_core->get_gpu()->gpu_tot_sim_cycle,
         events);
+    custom_region::observations().count(0,7,m_sid,mf->get_access_type()*16+status);
     return process_cache_access(cache, mf->get_addr(), inst, events, mf,
                                 status);
   }
@@ -2474,6 +2475,7 @@ void ldst_unit::L1_latency_queue_cycle() {
                         m_core->get_gpu()->gpu_sim_cycle +
                             m_core->get_gpu()->gpu_tot_sim_cycle,
                         events);
+      custom_region::observations().count(0,7,m_sid,mf_next->get_access_type()*16+status);
 
       bool write_sent = was_write_sent(events);
       bool read_sent = was_read_sent(events);
