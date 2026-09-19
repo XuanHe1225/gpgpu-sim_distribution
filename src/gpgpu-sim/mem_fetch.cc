@@ -108,6 +108,7 @@ mem_fetch::mem_fetch(const mem_access_t &access, const warp_inst_t *inst,
     m_raw_addr.chip = m_original_mf->get_tlx_addr().chip;
     m_raw_addr.sub_partition = m_original_mf->get_tlx_addr().sub_partition;
   }
+  custom_region::observations().created(get_access_type(),m_access.is_write());
   pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
       m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
@@ -164,6 +165,7 @@ mem_fetch::mem_fetch(const mem_access_t &access,
     m_raw_addr.chip = m_original_mf->get_tlx_addr().chip;
     m_raw_addr.sub_partition = m_original_mf->get_tlx_addr().sub_partition;
   }
+  custom_region::observations().created(get_access_type(),m_access.is_write());
   pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
       m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
@@ -176,6 +178,7 @@ mem_fetch::mem_fetch(const mem_access_t &access,
 }
 
 mem_fetch::~mem_fetch() {
+  custom_region::observations().destroyed(get_access_type(),m_access.is_write());
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0)
     pnm_paths::observations().finish_request(get_request_uid(), pnm_events::cycle(this));
   if (pnm_events::sink())

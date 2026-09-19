@@ -2109,9 +2109,13 @@ void shader_core_ctx::execute() {
       reg_id = m_fu[n]->get_issue_reg_id();
     }
     warp_inst_t **ready_reg = issue_inst.get_ready(partition_issue, reg_id);
-    if (issue_inst.has_ready(partition_issue, reg_id) &&
-        (!custom_overlap_enabled() || custom_scalar_tracker.ready((*ready_reg)->get_uid())) &&
-        m_fu[n]->can_issue(**ready_reg)) {
+    const bool has_ready=issue_inst.has_ready(partition_issue,reg_id);
+    const bool arrived=has_ready &&
+        (!custom_overlap_enabled() || custom_scalar_tracker.ready((*ready_reg)->get_uid()));
+    const bool available=arrived && m_fu[n]->can_issue(**ready_reg);
+    const unsigned region_pc=has_ready?(*ready_reg)->pc:0;
+    unsigned region_reason=arrived?2:1;
+    if (available) {
       bool schedule_wb_now = !m_fu[n]->stallable();
       int resbus = -1;
       if (schedule_wb_now &&
@@ -2119,14 +2123,18 @@ void shader_core_ctx::execute() {
         assert((*ready_reg)->latency < MAX_ALU_LATENCY);
         m_result_bus[resbus]->set((*ready_reg)->latency);
         if(custom_overlap_enabled()) custom_scalar_tracker.enter((*ready_reg)->get_uid());
+        region_reason=0;
         m_fu[n]->issue(issue_inst);
       } else if (!schedule_wb_now) {
         if(custom_overlap_enabled()) custom_scalar_tracker.enter((*ready_reg)->get_uid());
+        region_reason=0;
         m_fu[n]->issue(issue_inst);
       } else {
+        region_reason=3;
         // stall issue (cannot reserve result bus)
       }
     }
+    if(has_ready) custom_region::observations().resource(m_sid,issue_port,region_pc,region_reason);
   }
 }
 

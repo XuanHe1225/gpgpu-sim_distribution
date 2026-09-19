@@ -1,3 +1,4 @@
+#include "custom_region_observation.h"
 // Copyright (c) 2009-2011, Tor M. Aamodt
 // The University of British Columbia
 // All rights reserved.
@@ -124,7 +125,11 @@ class mem_fetch {
   unsigned long long get_streamID() const { return m_streamID; }
 
   enum mem_access_type get_access_type() const { return m_access.get_type(); }
-  void set_access_type(enum mem_access_type type) { m_access.set_type(type); }
+  void set_access_type(enum mem_access_type type) {
+    custom_region::observations().destroyed(m_access.get_type(),m_access.is_write());
+    m_access.set_type(type);
+    custom_region::observations().created(m_access.get_type(),m_access.is_write());
+  }
   const active_mask_t &get_access_warp_mask() const {
     return m_access.get_warp_mask();
   }

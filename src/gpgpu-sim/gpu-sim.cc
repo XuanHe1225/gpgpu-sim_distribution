@@ -632,6 +632,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_collector_partitioned_allocation", OPT_BOOL,
                          &custom_collector_partitioned_allocation,
                          "Allocate oldest input with free sub-core collectors", "0");
+  option_parser_register(opp, "-custom_region_observation", OPT_BOOL,
+                         &custom_region::enabled_flag(),
+                         "Read-only CTA0 interval counters and request boundaries", "0");
   option_parser_register(opp, "-custom_scalar_operand_overlap", OPT_BOOL,
                          &custom_scalar_operand_overlap,
                          "Trace scalar preparation before actual same-unit result arrival", "0");
@@ -1733,6 +1736,7 @@ void gpgpu_sim::gpu_print_stat(unsigned long long streamID) {
   fprintf(statfout, "%s", kernel_info_str.c_str());
 
   pnm_paths::observations().print();
+  custom_region::observations().print();
   printf("kernel_stream_id = %llu\n", streamID);
 
   printf("gpu_sim_cycle = %lld\n", gpu_sim_cycle);

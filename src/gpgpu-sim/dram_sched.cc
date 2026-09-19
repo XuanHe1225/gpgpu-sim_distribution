@@ -265,7 +265,9 @@ void dram_t::scheduler_frfcfs() {
 // "ready" means column-timing eligible on the currently active row. It does
 // not claim replacing an already-selected bank request is legal or desirable.
 void frfcfs_scheduler::observe_queue() const {
-  auto &q = pnm_paths::observations().queues[m_dram->id]; ++q.samples;
+  auto &q = pnm_paths::observations().queues[m_dram->id];
+  const auto before=q;
+  ++q.samples;
   auto now = m_dram->m_gpu->global_cycle();
   for (unsigned b = 0; b < m_config->nbk; ++b) {
     const auto *bank = m_dram->bk[b];
@@ -289,4 +291,12 @@ void frfcfs_scheduler::observe_queue() const {
     observe(m_queue[b]);
     if (m_config->seperate_write_queue_enabled) observe(m_write_queue[b]);
   }
+  auto &region=custom_region::observations();
+  const unsigned id=m_dram->id;
+  region.count(3,6,id,0,q.samples-before.samples);
+  region.count(3,6,id,1,q.queued-before.queued);
+  region.count(3,6,id,2,q.rowhit-before.rowhit);
+  region.count(3,6,id,3,q.ready-before.ready);
+  region.count(3,6,id,4,q.behind-before.behind);
+  region.count(3,6,id,5,q.opposite-before.opposite);
 }

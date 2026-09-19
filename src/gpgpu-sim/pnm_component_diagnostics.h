@@ -1,6 +1,7 @@
 // Read-only component observations. Disabled by default; no simulated work.
 #ifndef PNM_COMPONENT_DIAGNOSTICS_H
 #define PNM_COMPONENT_DIAGNOSTICS_H
+#include "custom_region_observation.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -33,6 +34,8 @@ inline void clock(const char *name, unsigned launch, unsigned x, unsigned y,
   }();
   auto it = markers.find(name);
   if (it == markers.end() || (pc != it->second.first && pc != it->second.second)) return;
+  if (!x && !y && !z && !warp && (mask & 1))
+    custom_region::observations().clock(launch, pc == it->second.first, cycle);
   std::printf("PNMS_COMPONENT_CLOCK %s %u %u %u %u %u %llu %s %llu\n",
               name, launch, x, y, z, warp, mask,
               pc == it->second.first ? "start" : "stop", cycle);

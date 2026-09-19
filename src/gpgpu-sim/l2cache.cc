@@ -509,6 +509,7 @@ memory_sub_partition::memory_sub_partition(
 }
 
 memory_sub_partition::~memory_sub_partition() {
+  custom_region::observations().probes.erase(m_id);
   delete m_lrc;
   delete m_icnt_L2_queue;
   delete m_L2_dram_queue;
@@ -519,6 +520,15 @@ memory_sub_partition::~memory_sub_partition() {
 }
 
 void memory_sub_partition::cache_cycle(unsigned cycle) {
+  if(custom_region::enabled_flag() && !custom_region::observations().probes.count(m_id)) {
+    custom_region::observations().probes[m_id]=[this] {
+      unsigned long long sectors=0,bytes=0;
+      if(!m_config->m_L2_config.disabled()) m_L2cache->component_dirty(sectors,bytes);
+      return std::array<unsigned long long,7>{sectors,bytes,(unsigned long long)m_request_tracker.size(),
+        m_icnt_L2_queue->get_length(),m_L2_dram_queue->get_length(),
+        m_dram_L2_queue->get_length(),m_L2_icnt_queue->get_length()};
+    };
+  }
   if (pnm_components::enabled() && (cycle + m_id) % pnm_paths::period == 0) {
     unsigned mask = (!m_icnt_L2_queue->empty() ? 1 : 0) |
                     (m_L2_icnt_queue->full() ? 2 : 0) |
@@ -526,6 +536,7 @@ void memory_sub_partition::cache_cycle(unsigned cycle) {
                     (m_L2_dram_queue->full() ? 8 : 0) |
                     (!m_dram_L2_queue->empty() ? 16 : 0);
     ++pnm_paths::observations().l2[m_id][mask];
+    custom_region::observations().count(2,4,m_id,mask);
   }
   // L2 fill responses
   if (!m_config->m_L2_config.disabled()) {

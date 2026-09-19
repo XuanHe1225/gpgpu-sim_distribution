@@ -534,6 +534,7 @@ void dram_t::cycle() {
       }
     }
     m_component.blocked(component_union, component_common, component_ready);
+    custom_region::observations().count(3,5,id,component_union*32+component_common);
     if (pnm_components::enabled() && m_frfcfs_scheduler && ((n_cmd + id) % 64 == 0))
       m_frfcfs_scheduler->observe_queue();
   } else if (memory_pending_found)
@@ -545,6 +546,8 @@ void dram_t::cycle() {
 
   /////////////////////////////////////////////////////////
 
+  custom_region::observations().count(3,1,id,(issued_col_cmd || CCDc)?0:
+      (memory_pending_rw_found?1:(memory_pending_found?2:3)));
   // decrements counters once for each time dram_issueCMD is called
   DEC2ZERO(RRDc);
   DEC2ZERO(CCDc);
@@ -585,6 +588,7 @@ bool dram_t::issue_col_command(int j) {
       }
       rwq->push(bk[j]->mrq);
       m_component.command(false);
+      custom_region::observations().command(id,false,m_config->dram_atom_size);
       pnm_events::request("RD", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
                            bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
       bk[j]->mrq->txbytes += m_config->dram_atom_size;
@@ -623,6 +627,7 @@ bool dram_t::issue_col_command(int j) {
         }
         rwq->push(bk[j]->mrq);
         m_component.command(true);
+        custom_region::observations().command(id,true,m_config->dram_atom_size);
         pnm_events::request("WR", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
                              bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
 

@@ -58,6 +58,7 @@ struct Observations {
   }
   void transition(U uid, unsigned partition, unsigned type, int old_state,
                   int new_state, U old_cycle, U cycle) {
+    custom_region::observations().transition(uid,partition,type,old_state,new_state,old_cycle,cycle);
     if (!pnm_components::enabled() || uid % period) return;
     auto it = requests.emplace(uid, Request{partition, type, old_state, old_cycle}).first;
     auto &r = it->second;
@@ -67,6 +68,7 @@ struct Observations {
     r = {partition, type, new_state, cycle};
   }
   void finish_request(U uid, U cycle) {
+    custom_region::observations().finish_request(uid,cycle);
     if (!pnm_components::enabled() || uid % period) return;
     auto it = requests.find(uid); if (it == requests.end()) return;
     auto &r = it->second; assert(cycle >= r.begin);
