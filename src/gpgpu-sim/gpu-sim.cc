@@ -632,6 +632,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_collector_partitioned_allocation", OPT_BOOL,
                          &custom_collector_partitioned_allocation,
                          "Allocate oldest input with free sub-core collectors", "0");
+  option_parser_register(opp, "-custom_l1_completion_accounting", OPT_BOOL,
+                         &custom_l1_completion_accounting,
+                         "Retire an L1-hit load once after all destinations release", "0");
   option_parser_register(opp, "-custom_region_observation", OPT_BOOL,
                          &custom_region::enabled_flag(),
                          "Read-only CTA0 interval counters and request boundaries", "0");

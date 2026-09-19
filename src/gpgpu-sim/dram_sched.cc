@@ -240,6 +240,7 @@ void dram_t::scheduler_frfcfs() {
       if (req) {
         req->data->set_status(IN_PARTITION_MC_BANK_ARB_QUEUE,
                               m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle);
+        custom_region::observations().count(3,19,id,(custom_region::U(b)<<8)|prio);
         prio = (prio + 1) % m_config->nbk;
         bk[b]->mrq = req;
         if (m_config->gpgpu_memlatency_stat) {

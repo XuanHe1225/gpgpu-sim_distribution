@@ -2312,6 +2312,7 @@ class shader_core_config : public core_config {
   bool custom_sass_issue_stalls;
   bool custom_scalar_result_forwarding;
   bool custom_scalar_operand_overlap;
+  bool custom_l1_completion_accounting;
   bool pnm_simd_ready_boundary;
   bool custom_collector_fair_dispatch;
   bool custom_collector_local_round_robin;

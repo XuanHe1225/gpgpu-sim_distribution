@@ -1126,6 +1126,8 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       pnm_paths::observations().issue(inst.get_uid(), m_warp[warp_id]->get_kernel_info()->get_uid(),
                                      inst.pc, m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
   }
+  custom_region::observations().count(0,8,m_sid,
+      (custom_region::U(warp_id)<<32)|next_inst->pc);
   m_stats->shader_cycle_distro[2 + (*pipe_reg)->active_count()]++;
   func_exec_inst(**pipe_reg);
   pnm_events::instruction("issue", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
@@ -1610,9 +1612,14 @@ void scheduler_unit::cycle() {
           warp(warp_id).ibuffer_flush();
         } else {
           valid_inst = true;
-          if ((!m_shader->custom_overlap_enabled() || !m_shader->custom_scalar_tracker.blocked(warp_id)) &&
-              (!m_scoreboard->checkCollision(warp_id, pI) ||
-               m_shader->custom_can_prepare(warp_id,pI,m_shader->get_active_mask(warp_id,pI)))) {
+          const bool prepared_blocked=m_shader->custom_overlap_enabled() &&
+              m_shader->custom_scalar_tracker.blocked(warp_id);
+          const bool operands_ready=!prepared_blocked &&
+              (!m_scoreboard->checkCollision(warp_id,pI) ||
+               m_shader->custom_can_prepare(warp_id,pI,m_shader->get_active_mask(warp_id,pI)));
+          custom_region::observations().count(0,9,m_shader->get_sid(),
+              (custom_region::U(warp_id)<<2)|(prepared_blocked?0:(operands_ready?2:1)));
+          if (operands_ready) {
             SCHED_DPRINTF(
                 "Warp (warp_id %u, dynamic_warp_id %u) passes scoreboard\n",
                 (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
@@ -2484,6 +2491,7 @@ void ldst_unit::L1_latency_queue_cycle() {
         assert(!read_sent);
         l1_latency_queue[j][0] = NULL;
         if (mf_next->get_inst().is_load()) {
+          bool released_output = false;
           for (unsigned r = 0; r < MAX_OUTPUT_VALUES; r++)
             if (mf_next->get_inst().out[r] > 0) {
               assert(m_pending_writes[mf_next->get_inst().warp_id()]
@@ -2496,9 +2504,16 @@ void ldst_unit::L1_latency_queue_cycle() {
                     mf_next->get_inst().out[r]);
                 m_scoreboard->releaseRegister(mf_next->get_inst().warp_id(),
                                               mf_next->get_inst().out[r]);
-                m_core->warp_inst_complete(mf_next->get_inst());
+                released_output = true;
+                if (!m_config->custom_l1_completion_accounting)
+                  m_core->warp_inst_complete(mf_next->get_inst());
               }
             }
+
+          // A vector load is one instruction, independent of destination count.
+          // Each destination keeps its existing last-sector release timing.
+          if (m_config->custom_l1_completion_accounting && released_output)
+            m_core->warp_inst_complete(mf_next->get_inst());
 
           // release LDGSTS
           if (mf_next->get_inst().m_is_ldgsts) {
@@ -3677,6 +3692,8 @@ void ldst_unit::cycle() {
     if (pnm_components::enabled() && !pipe_reg.get_cuda_cta_id().x &&
         !pipe_reg.get_cuda_cta_id().y && !pipe_reg.get_cuda_cta_id().z && !pipe_reg.warp_id())
       ++pnm_paths::observations().lsu[{m_core->get_kernel()->get_uid(), m_sid, pipe_reg.pc, rc_fail}];
+    custom_region::observations().count(0,15,m_sid,
+        (custom_region::U(pipe_reg.warp_id())<<16)|(unsigned(type)<<8)|unsigned(rc_fail));
     m_stats->gpgpu_n_stall_shd_mem++;
     m_stats->gpu_stall_shd_mem_breakdown[type][rc_fail]++;
     return;

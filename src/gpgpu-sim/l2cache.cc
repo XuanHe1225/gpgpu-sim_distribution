@@ -609,6 +609,12 @@ void memory_sub_partition::cache_cycle(unsigned cycle) {
     if (!mf) mf = get_chiplet_req();
   }
 
+  const bool custom_sample=custom_region::enabled_flag() && ((cycle+m_id)%64==0);
+  if(custom_sample) {
+    unsigned mask=(mf?1:0)|(m_L2_icnt_queue->full()?2:0)|
+      ((!m_config->m_L2_config.disabled() && !m_L2cache->data_port_free())?4:0);
+    custom_region::observations().count(2,12,m_id,mask);
+  }
   if (mf) {
     if (mf->get_type() == WRITE_FORWARD) {
       // pseudo-coherence update from other chiplet, directly update L2 tag.
@@ -639,6 +645,7 @@ void memory_sub_partition::cache_cycle(unsigned cycle) {
                               m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle +
                                   m_memcpy_cycle_offset,
                               events);
+        custom_region::observations().count(2,14,m_id,mf->get_access_type()*16+status);
         bool write_sent = was_write_sent(events);
         bool read_sent = was_read_sent(events);
         pnm_events::request("l2", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
@@ -711,7 +718,13 @@ void memory_sub_partition::cache_cycle(unsigned cycle) {
     }
   }
 
-  // ROP delay queue
+  // ROP delay queue: sampled masks at the actual transfer opportunity.
+  if(custom_sample) {
+    unsigned mask=(!m_rop.empty()?1:0)|
+      ((!m_rop.empty() && cycle>=m_rop.front().ready_cycle)?2:0)|
+      (m_icnt_L2_queue->full()?4:0);
+    custom_region::observations().count(2,13,m_id,mask);
+  }
   if (!m_rop.empty() && (cycle >= m_rop.front().ready_cycle) &&
       !m_icnt_L2_queue->full()) {
     mem_fetch *mf = m_rop.front().req;

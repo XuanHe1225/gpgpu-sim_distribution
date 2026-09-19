@@ -23,12 +23,14 @@ struct Window {
   std::map<unsigned,bool> direction;
   std::map<std::pair<unsigned,bool>,U> pending[2];
   std::map<unsigned,std::array<U,7>> l2[2];
+  std::map<std::pair<unsigned,unsigned>,std::array<U,6>> cache[2];
 };
 struct Observations {
   std::map<U,Window> windows;
   std::map<U,Request> requests; // UID modulo64, bounded by outstanding requests
   std::map<std::pair<unsigned,bool>,U> pending;
   std::map<unsigned,std::function<std::array<U,7>()>> probes;
+  std::map<unsigned,std::function<std::vector<std::array<U,7>>()>> cache_probes;
   void created(unsigned type,bool write) {
     if(enabled_flag()) ++pending[{type,write}];
   }
@@ -45,6 +47,8 @@ struct Observations {
   void snapshot(Window &w,unsigned edge) {
     w.pending[edge]=pending;
     for(const auto &p:probes) w.l2[edge][p.first]=p.second();
+    for(const auto &p:cache_probes) for(const auto &s:p.second())
+      w.cache[edge][{p.first,unsigned(s[0])}]={s[1],s[2],s[3],s[4],s[5],s[6]};
   }
   void clock(U launch,bool start,U cycle) {
     if(!enabled_flag()) return;
@@ -91,7 +95,7 @@ struct Observations {
   }
   void print() {
     if(!enabled_flag()) return;
-    std::printf("CUSTOM_REGION_VERSION 1 64\n");
+    std::printf("CUSTOM_REGION_VERSION 2 64\n");
     for(const auto &p:windows) {
       const auto &w=p.second; assert(!w.open);
       std::printf("CUSTOM_REGION_WINDOW %llu %llu %llu\n",p.first,w.start,w.stop);
@@ -105,6 +109,11 @@ struct Observations {
         std::printf("CUSTOM_REGION_RESIDENCE %llu %u %u %d %llu %llu %llu\n",p.first,
           std::get<0>(c.first),std::get<1>(c.first),std::get<2>(c.first),c.second.segments,c.second.cycles,c.second.censored);
       for(unsigned edge=0;edge<2;++edge) {
+        for(const auto &c:w.cache[edge]) {
+          std::printf("CUSTOM_REGION_CACHE %llu %u %u %u",p.first,edge,c.first.first,c.first.second);
+          for(U v:c.second) std::printf(" %llu",v);
+          std::printf("\n");
+        }
         for(const auto &c:w.pending[edge])
           std::printf("CUSTOM_REGION_PENDING %llu %u %u %u %llu\n",p.first,edge,c.first.first,unsigned(c.first.second),c.second);
         for(const auto &c:w.l2[edge]) {

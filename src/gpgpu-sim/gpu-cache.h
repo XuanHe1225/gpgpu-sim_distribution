@@ -33,6 +33,7 @@
 #define GPU_CACHE_H
 
 #include <stdio.h>
+#include <array>
 #include <stdlib.h>
 #include "../abstract_hardware_model.h"
 #include "../tr1_hash_map.h"
@@ -988,6 +989,7 @@ class tag_array {
                  unsigned &total_hit_res, unsigned &total_res_fail) const;
 
   void update_cache_parameters(cache_config &config);
+  std::vector<std::array<unsigned long long,7>> custom_snapshot() const;
   void add_pending_line(mem_fetch *mf);
   void remove_pending_line(mem_fetch *mf);
   void inc_dirty() { m_dirty++; }

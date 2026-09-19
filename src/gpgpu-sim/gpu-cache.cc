@@ -32,6 +32,7 @@
 
 #include "gpu-cache.h"
 #include "pnm_memory_events.h"
+#include "custom_region_observation.h"
 #include <assert.h>
 #include <cstdint>
 #include "gpu-sim.h"
@@ -218,6 +219,30 @@ void tag_array::init(int core_id, int type_id) {
   m_type_id = type_id;
   is_used = false;
   m_dirty = 0;
+  if(custom_region::enabled_flag() && core_id>=0 && type_id==get_shader_normal_cache_id())
+    custom_region::observations().cache_probes[core_id]=[this]{return custom_snapshot();};
+}
+
+std::vector<std::array<unsigned long long,7>> tag_array::custom_snapshot() const {
+  std::vector<std::array<unsigned long long,7>> result;
+  for(unsigned set=0;set<m_config.m_nset;++set) {
+    std::array<unsigned long long,7> counts={set,m_config.m_assoc,0,0,0,0,0};
+    for(unsigned way=0;way<m_config.m_assoc;++way) {
+      auto *line=m_lines[set*m_config.m_assoc+way];
+      counts[2]+=!line->is_invalid_line();
+      for(unsigned sector=0;sector<SECTOR_CHUNCK_SIZE;++sector) {
+        mem_access_sector_mask_t mask;mask.set(sector);
+        switch(line->get_status(mask)) {
+          case INVALID:++counts[3];break;
+          case RESERVED:++counts[4];break;
+          case VALID:++counts[5];break;
+          case MODIFIED:++counts[6];break;
+        }
+      }
+    }
+    result.push_back(counts);
+  }
+  return result;
 }
 
 void tag_array::add_pending_line(mem_fetch *mf) {
@@ -361,6 +386,10 @@ enum cache_request_status tag_array::access(new_addr_type addr, unsigned time,
       m_miss++;
       shader_cache_access_log(m_core_id, m_type_id, 1);  // log cache misses
       if (m_config.m_alloc_policy == ON_MISS) {
+        if(m_core_id>=0 && m_type_id==get_shader_normal_cache_id())
+          custom_region::observations().count(0,11,m_core_id,
+            (custom_region::U(idx/m_config.m_assoc)<<8) |
+            (m_lines[idx]->is_invalid_line()?0:(m_lines[idx]->is_modified_line()?2:1)));
         if (m_lines[idx]->is_modified_line()) {
           wb = true;
           // m_lines[idx]->set_byte_mask(mf);
@@ -2036,7 +2065,12 @@ enum cache_request_status data_cache::access(new_addr_type addr, mem_fetch *mf,
 enum cache_request_status l1_cache::access(new_addr_type addr, mem_fetch *mf,
                                            unsigned time,
                                            std::list<cache_event> &events) {
-  return data_cache::access(addr, mf, time, events);
+  auto status=data_cache::access(addr, mf, time, events);
+  custom_region::observations().count(0,10,mf->get_sid(),
+      (custom_region::U(mf->get_wid())<<32) |
+      (custom_region::U(m_config.set_index(addr))<<16) |
+      (mf->get_access_type()<<4) | status);
+  return status;
 }
 
 /// Access function for tex_cache

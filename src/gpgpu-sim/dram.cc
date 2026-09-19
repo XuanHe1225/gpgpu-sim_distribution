@@ -449,6 +449,10 @@ void dram_t::cycle() {
     }
   }
 
+  if(memory_Pending_ready) {
+    custom_region::observations().count(3,18,id,0);
+    if(!issued_col_cmd) custom_region::observations().count(3,18,id,1);
+  }
   issued = issued_row_cmd || issued_col_cmd;
   if (!issued) {
     n_nop++;

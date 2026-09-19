@@ -36,6 +36,7 @@
 
 #include "local_interconnect.h"
 #include "mem_fetch.h"
+#include "custom_region_observation.h"
 
 xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
                          unsigned n_shader, unsigned n_mem,
@@ -113,6 +114,23 @@ bool xbar_router::Has_Buffer_Out(unsigned output_deviceID, unsigned size) {
 }
 
 void xbar_router::Advance() {
+  const bool sample=custom_region::enabled_flag() && cycles%64==0;
+  const auto prior_grants=reqs_util;
+  if(sample) {
+    unsigned nonempty=0,queued=0,blocked=0,behind=0;
+    std::set<unsigned> destinations,ready;
+    for(unsigned i=0;i<total_nodes;++i) if(!in_buffers[i].empty()) {
+      ++nonempty;queued+=in_buffers[i].size();
+      unsigned dest=in_buffers[i].front().output_deviceID;
+      destinations.insert(dest);
+      if(Has_Buffer_Out(dest,1))ready.insert(dest);
+      else {++blocked;behind+=in_buffers[i].size()-1;}
+    }
+    auto &o=custom_region::observations();
+    o.count(1,16,m_id,0);o.count(1,16,m_id,1,nonempty);o.count(1,16,m_id,2,queued);
+    o.count(1,16,m_id,3,destinations.size());o.count(1,16,m_id,4,ready.size());
+    o.count(1,16,m_id,5,blocked);o.count(1,16,m_id,6,behind);
+  }
   if (arbit_type == NAIVE_RR)
     RR_Advance();
   else if (arbit_type == iSLIP)
@@ -121,6 +139,7 @@ void xbar_router::Advance() {
     Perfect_Advance();
   else
     assert(0);
+  if(sample) custom_region::observations().count(1,16,m_id,7,reqs_util-prior_grants);
 }
 
 void xbar_router::Perfect_Advance() {
