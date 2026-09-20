@@ -192,14 +192,18 @@ void xbar_router::Advance() {
 }
 
 void xbar_router::Perfect_Advance() {
+  bool active = false;
+  unsigned reqs = 0;
   for (unsigned i = 0; i < total_nodes; i++) {
     unsigned node_id = (i + next_node_id) % total_nodes;
     if (!in_buffers[node_id].empty()) {
+      active = true;
       Packet _packet = in_buffers[node_id].front();
       if (Has_Buffer_Out(_packet.output_deviceID, 1)) {
         out_buffers[_packet.output_deviceID].push(_packet);
         custom_queue_depart(node_id,_packet.output_deviceID);
         in_buffers[node_id].pop();
+        ++reqs;
       } else {
         out_buffer_full++;
       }
@@ -207,6 +211,16 @@ void xbar_router::Perfect_Advance() {
   }
 
   next_node_id = (next_node_id + 1) % total_nodes;
+
+  // Observe the unchanged upstream PERFECT transfers. In particular, multiple
+  // inputs may reach one output in a tick; FIFO matching bounds do not apply.
+  if (active) ++cycles_util;
+  reqs_util += reqs;
+  for (unsigned i = 0; i < total_nodes; ++i) {
+    in_buffer_util += in_buffers[i].size();
+    out_buffer_util += out_buffers[i].size();
+  }
+  ++cycles;
 };
 
 void xbar_router::RR_Advance() {
@@ -484,6 +498,12 @@ bool LocalInterconnect::HasBuffer(unsigned deviceID, unsigned int size) const {
 }
 
 void LocalInterconnect::DisplayStats() const {
+  // Exact read-only totals make conservation auditable without rounded ratios.
+  for (unsigned i = 0; i < n_subnets; ++i) {
+    printf("custom_icnt_totals subnet=%u injected=%llu granted=%llu cycles=%llu active=%llu busy=%u\n",
+           i, net[i]->packets_num, net[i]->reqs_util, net[i]->cycles,
+           net[i]->cycles_util, static_cast<unsigned>(net[i]->Busy()));
+  }
   printf("Req_Network_injected_packets_num = %lld\n",
          net[REQ_NET]->packets_num);
   printf("Req_Network_cycles = %lld\n", net[REQ_NET]->cycles);
