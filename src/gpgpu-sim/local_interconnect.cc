@@ -38,6 +38,7 @@
 #include "local_interconnect.h"
 #include "mem_fetch.h"
 #include "custom_region_observation.h"
+#include "custom_dram_progress.h"
 
 xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
                          unsigned n_shader, unsigned n_mem,
@@ -90,6 +91,7 @@ void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
   assert(input_deviceID < total_nodes);
   in_buffers[input_deviceID].push(Packet(data, output_deviceID));
   packets_num++;
+  custom_dram_progress::network_packet(data,m_id,0);
   if(custom_queue_census) {
     assert(output_deviceID>=_n_shader);
     custom_queue_census->push(input_deviceID,output_deviceID-_n_shader);
@@ -104,6 +106,7 @@ void* xbar_router::Pop(unsigned ouput_deviceID) {
   if (!out_buffers[ouput_deviceID].empty()) {
     data = out_buffers[ouput_deviceID].front().data;
     out_buffers[ouput_deviceID].pop();
+    custom_dram_progress::network_packet(data,m_id,2);
   }
 
   return data;
@@ -125,6 +128,7 @@ bool xbar_router::Has_Buffer_Out(unsigned output_deviceID, unsigned size) {
 }
 
 void xbar_router::custom_queue_depart(unsigned input,unsigned output) {
+  custom_dram_progress::network_packet(in_buffers[input].front().data,m_id,1);
   if(custom_queue_census) {
     custom_queue_census->pop(input,output-_n_shader);
     custom_region::observations().icnt_packet(output-_n_shader,false);
@@ -206,6 +210,7 @@ void xbar_router::Perfect_Advance() {
         ++reqs;
       } else {
         out_buffer_full++;
+        custom_dram_progress::network_packet(_packet.data,m_id,3);
       }
     }
   }

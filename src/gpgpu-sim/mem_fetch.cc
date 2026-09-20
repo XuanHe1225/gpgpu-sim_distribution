@@ -37,6 +37,8 @@
 #include "../../libcuda/gpgpu_context.h"
 #include "../gpgpusim_entrypoint.h"
 
+#include "custom_dram_progress.h"
+
 unsigned long long pnm_events::cycle(mem_fetch *mf) {
   auto *gpu = mf->get_mem_config()->gpgpu_ctx->the_gpgpusim->g_the_gpu;
   return gpu->gpu_sim_cycle + gpu->gpu_tot_sim_cycle;
@@ -56,6 +58,17 @@ void *mem_fetch::operator new(size_t size) {
 
 void mem_fetch::operator delete(void *ptr) noexcept {
   s_free_list.push_back(ptr);
+}
+
+namespace {
+const bool custom_progress_bound = [] {
+  custom_dram_progress::network_hook() = [](void *data,unsigned subnet,unsigned event) {
+    auto *mf=static_cast<mem_fetch*>(data);
+    custom_dram_progress::observations().network(mf->get_sid(),mf->get_access_type(),
+      subnet,event,mf->get_data_size(),pnm_events::cycle(mf));
+  };
+  return true;
+}();
 }
 
 mem_fetch::mem_fetch(const mem_access_t &access, const warp_inst_t *inst,
@@ -109,6 +122,8 @@ mem_fetch::mem_fetch(const mem_access_t &access, const warp_inst_t *inst,
     m_raw_addr.sub_partition = m_original_mf->get_tlx_addr().sub_partition;
   }
   custom_region::observations().created(get_access_type(),m_access.is_write());
+  if(custom_dram_progress::enabled_flag())
+    custom_dram_progress::observations().created(get_sid(),get_access_type(),get_data_size(),pnm_events::cycle(this));
   pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
       m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
@@ -166,6 +181,8 @@ mem_fetch::mem_fetch(const mem_access_t &access,
     m_raw_addr.sub_partition = m_original_mf->get_tlx_addr().sub_partition;
   }
   custom_region::observations().created(get_access_type(),m_access.is_write());
+  if(custom_dram_progress::enabled_flag())
+    custom_dram_progress::observations().created(get_sid(),get_access_type(),get_data_size(),pnm_events::cycle(this));
   pnm_events::request("create", cycle, this, mem_access_type_str(get_access_type()),
       m_original_wr_mf ? m_original_wr_mf->get_request_uid() : 0);
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0) {
@@ -179,6 +196,8 @@ mem_fetch::mem_fetch(const mem_access_t &access,
 
 mem_fetch::~mem_fetch() {
   custom_region::observations().destroyed(get_access_type(),m_access.is_write());
+  if(custom_dram_progress::enabled_flag())
+    custom_dram_progress::observations().destroyed(get_sid(),get_access_type(),m_status,get_data_size(),pnm_events::cycle(this));
   if (pnm_components::enabled() && get_request_uid() % pnm_paths::period == 0)
     pnm_paths::observations().finish_request(get_request_uid(), pnm_events::cycle(this));
   if (pnm_events::sink())
@@ -229,6 +248,8 @@ void mem_fetch::set_status(enum mem_fetch_status status,
   }
   if (status != m_status)
     pnm_events::request("status", cycle, this, Status_str[status]);
+  if(custom_dram_progress::enabled_flag())
+    custom_dram_progress::observations().transition(get_sid(),get_access_type(),m_status,status,get_data_size(),pnm_events::cycle(this));
   m_status = status;
   m_status_change = cycle;
 }

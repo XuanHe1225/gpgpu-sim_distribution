@@ -32,6 +32,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "gpu-sim.h"
+#include "custom_dram_progress.h"
 
 #include <execinfo.h>
 #include <math.h>
@@ -635,6 +636,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_l1_completion_accounting", OPT_BOOL,
                          &custom_l1_completion_accounting,
                          "Retire an L1-hit load once after all destinations release", "0");
+  option_parser_register(opp, "-custom_dram_progress_observation", OPT_BOOL,
+                         &custom_dram_progress::enabled_flag(),
+                         "Read-only whole-launch per-SM memory progress", "0");
   option_parser_register(opp, "-custom_region_observation", OPT_BOOL,
                          &custom_region::enabled_flag(),
                          "Read-only CTA0 interval counters and request boundaries", "0");
@@ -1740,6 +1744,7 @@ void gpgpu_sim::gpu_print_stat(unsigned long long streamID) {
 
   pnm_paths::observations().print();
   custom_region::observations().print();
+  custom_dram_progress::observations().print(global_cycle());
   printf("kernel_stream_id = %llu\n", streamID);
 
   printf("gpu_sim_cycle = %lld\n", gpu_sim_cycle);
