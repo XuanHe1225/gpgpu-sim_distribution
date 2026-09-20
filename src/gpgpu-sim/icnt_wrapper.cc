@@ -31,6 +31,7 @@
 #include "../intersim2/globals.hpp"
 #include "../intersim2/interconnect_interface.hpp"
 #include "local_interconnect.h"
+#include <stdexcept>
 
 icnt_create_p icnt_create;
 icnt_init_p icnt_init;
@@ -168,11 +169,16 @@ void icnt_reg_options(class OptionParser* opp) {
                          &g_inct_config.arbiter_algo, "arbiter_algo", "1");
   option_parser_register(opp, "-icnt_verbose", OPT_UINT32,
                          &g_inct_config.verbose, "inct_verbose", "0");
+  option_parser_register(opp, "-custom_icnt_queue_observation", OPT_BOOL,
+                         &custom_icnt_queue::enabled_flag(),
+                         "Read-only request FIFO matching opportunities", "0");
   option_parser_register(opp, "-icnt_grant_cycles", OPT_UINT32,
                          &g_inct_config.grant_cycles, "grant_cycles", "1");
 }
 
 void icnt_wrapper_init() {
+  if(custom_icnt_queue::enabled_flag() && g_network_mode!=2)
+    throw std::invalid_argument("custom_icnt_queue_observation requires local interconnect");
   switch (g_network_mode) {
     case INTERSIM:
       // FIXME: delete the object: may add icnt_done wrapper

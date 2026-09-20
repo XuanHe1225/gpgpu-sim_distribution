@@ -32,6 +32,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include "local_interconnect.h"
@@ -65,6 +66,11 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
     active_out_buffers = n_shader;
   }
 
+  if(custom_icnt_queue::enabled_flag() && m_type==REQ_NET) {
+    if(arbit_type!=iSLIP || m_localinct_config.subnets!=2 || !custom_region::enabled_flag())
+      throw std::invalid_argument("custom_icnt_queue_observation requires region observation, iSLIP and two subnets");
+    custom_queue_census.reset(new custom_icnt_queue::Census(n_shader,n_mem));
+  }
   cycles = 0;
   conflicts = 0;
   out_buffer_full = 0;
@@ -84,6 +90,11 @@ void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
   assert(input_deviceID < total_nodes);
   in_buffers[input_deviceID].push(Packet(data, output_deviceID));
   packets_num++;
+  if(custom_queue_census) {
+    assert(output_deviceID>=_n_shader);
+    custom_queue_census->push(input_deviceID,output_deviceID-_n_shader);
+    custom_region::observations().icnt_packet(output_deviceID-_n_shader,true);
+  }
 }
 
 void* xbar_router::Pop(unsigned ouput_deviceID) {
@@ -113,7 +124,39 @@ bool xbar_router::Has_Buffer_Out(unsigned output_deviceID, unsigned size) {
   return (out_buffers[output_deviceID].size() + size <= out_buffer_limit);
 }
 
+void xbar_router::custom_queue_depart(unsigned input,unsigned output) {
+  if(custom_queue_census) {
+    custom_queue_census->pop(input,output-_n_shader);
+    custom_region::observations().icnt_packet(output-_n_shader,false);
+  }
+}
+
 void xbar_router::Advance() {
+  const bool queue_active=custom_queue_census && custom_region::observations().has_open_window();
+  const bool queue_sample=queue_active && custom_icnt_queue::sample_tick(cycles);
+  const auto queue_tick=cycles,queue_prior_grants=reqs_util;
+  unsigned queue_heads=0;
+  custom_icnt_queue::Sample queue_snapshot;
+  std::vector<int> queue_fronts;
+  std::vector<unsigned> queue_destinations;
+  if(queue_active) {
+    queue_fronts.assign(_n_shader,-1);
+    std::vector<bool> ready(_n_mem,false),heads(_n_mem,false);
+    for(unsigned d=0;d<_n_mem;++d) ready[d]=Has_Buffer_Out(d+_n_shader,1);
+    for(unsigned i=0;i<_n_shader;++i) {
+      assert(in_buffers[i].size()==custom_queue_census->size(i));
+      if(!in_buffers[i].empty()) {
+        const unsigned d=in_buffers[i].front().output_deviceID-_n_shader;
+        queue_fronts[i]=d;if(ready[d]) heads[d]=true;
+      }
+    }
+    queue_heads=std::count(heads.begin(),heads.end(),true);
+    if(queue_sample) {
+      queue_snapshot=custom_queue_census->snapshot(queue_fronts,ready);queue_snapshot.tick=cycles;
+      queue_destinations.assign(_n_mem,0);
+      for(const auto &row:custom_queue_census->population()) for(unsigned d=0;d<_n_mem;++d) queue_destinations[d]+=row[d];
+    }
+  }
   const bool sample=custom_region::enabled_flag() && cycles%64==0;
   const auto prior_grants=reqs_util;
   if(sample) {
@@ -140,6 +183,12 @@ void xbar_router::Advance() {
   else
     assert(0);
   if(sample) custom_region::observations().count(1,16,m_id,7,reqs_util-prior_grants);
+  if(queue_active) {
+    const unsigned grants=reqs_util-queue_prior_grants;
+    queue_snapshot.grants=grants;
+    custom_region::observations().icnt_tick(queue_tick,queue_heads,grants,
+      queue_sample?&queue_snapshot:nullptr,queue_fronts,queue_destinations);
+  }
 }
 
 void xbar_router::Perfect_Advance() {
@@ -149,6 +198,7 @@ void xbar_router::Perfect_Advance() {
       Packet _packet = in_buffers[node_id].front();
       if (Has_Buffer_Out(_packet.output_deviceID, 1)) {
         out_buffers[_packet.output_deviceID].push(_packet);
+        custom_queue_depart(node_id,_packet.output_deviceID);
         in_buffers[node_id].pop();
       } else {
         out_buffer_full++;
@@ -175,6 +225,7 @@ void xbar_router::RR_Advance() {
       if (Has_Buffer_Out(_packet.output_deviceID, 1)) {
         if (!issued[_packet.output_deviceID]) {
           out_buffers[_packet.output_deviceID].push(_packet);
+          custom_queue_depart(node_id,_packet.output_deviceID);
           in_buffers[node_id].pop();
           issued[_packet.output_deviceID] = true;
           reqs++;
@@ -261,6 +312,7 @@ void xbar_router::iSLIP_Advance() {
         Packet _packet = in_buffers[node_id].front();
         if (_packet.output_deviceID == dest) {
           out_buffers[_packet.output_deviceID].push(_packet);
+          custom_queue_depart(node_id,_packet.output_deviceID);
           in_buffers[node_id].pop();
           input_nodes.erase(node_id);  // can only be used once
           if (verbose)

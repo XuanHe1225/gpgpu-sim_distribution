@@ -31,6 +31,8 @@
 
 #include <iostream>
 #include <map>
+#include <memory>
+#include "custom_icnt_queue_observation.h"
 #include <queue>
 #include <vector>
 using namespace std;
@@ -84,6 +86,8 @@ class xbar_router {
   unsigned long long packets_num;
 
  private:
+  std::unique_ptr<custom_icnt_queue::Census> custom_queue_census;
+  void custom_queue_depart(unsigned input,unsigned output);
   void iSLIP_Advance();
   void RR_Advance();
   void Perfect_Advance();

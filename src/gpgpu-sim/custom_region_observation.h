@@ -7,6 +7,7 @@
 #include <map>
 #include <tuple>
 #include <vector>
+#include "custom_icnt_queue_observation.h"
 
 // Read-only CTA0/warp0 marker windows. Core timestamps; counters name their domain.
 // Boundaries follow simulator callback order (including events in the same tick).
@@ -16,6 +17,11 @@ inline bool &enabled_flag() { static bool enabled=false; return enabled; }
 struct Request { unsigned partition,type; int state; U begin; };
 struct Residence {U segments=0,cycles=0,censored=0;};
 struct Window {
+  U icnt_first=0,icnt_last=0,icnt_ticks=0,icnt_heads=0,icnt_grants=0;
+  std::vector<custom_icnt_queue::Sample> icnt_samples;
+  std::vector<std::array<U,3>> icnt_missed; // bounded concrete tick/head/grant events
+  std::map<unsigned,std::array<U,4>> icnt_destinations; // heads,queued,arrivals,departures
+
   U start=0,stop=0; bool open=true;
   std::map<std::tuple<unsigned,unsigned,unsigned,U>,U> counts;
   std::map<std::tuple<unsigned,unsigned,U,unsigned>,U> resources;
@@ -31,6 +37,31 @@ struct Observations {
   std::map<std::pair<unsigned,bool>,U> pending;
   std::map<unsigned,std::function<std::array<U,7>()>> probes;
   std::map<unsigned,std::function<std::vector<std::array<U,7>>()>> cache_probes;
+  bool has_open_window() const {
+    if(!enabled_flag()) return false;
+    for(const auto &p:windows) if(p.second.open) return true;
+    return false;
+  }
+  void icnt_packet(unsigned destination,bool arrival) {
+    if(!enabled_flag()) return;
+    for(auto &p:windows) if(p.second.open) ++p.second.icnt_destinations[destination][arrival?2:3];
+  }
+  void icnt_tick(U tick,unsigned heads,unsigned grants,const custom_icnt_queue::Sample *sample,
+                 const std::vector<int> &fronts,const std::vector<unsigned> &queued_by_destination) {
+    assert(grants<=heads);
+    for(auto &p:windows) if(p.second.open) {
+      auto &w=p.second;
+      if(!w.icnt_ticks) w.icnt_first=tick;
+      w.icnt_last=tick;++w.icnt_ticks;w.icnt_heads+=heads;w.icnt_grants+=grants;
+      if(heads!=grants && w.icnt_missed.size()<8) w.icnt_missed.push_back({tick,heads,grants});
+      if(sample) {
+        w.icnt_samples.push_back(*sample);
+        for(auto d:fronts) if(d>=0) ++w.icnt_destinations[d][0];
+        for(unsigned d=0;d<queued_by_destination.size();++d)
+          w.icnt_destinations[d][1]+=queued_by_destination[d];
+      }
+    }
+  }
   void created(unsigned type,bool write) {
     if(enabled_flag()) ++pending[{type,write}];
   }
@@ -95,10 +126,22 @@ struct Observations {
   }
   void print() {
     if(!enabled_flag()) return;
-    std::printf("CUSTOM_REGION_VERSION 2 64\n");
+    std::printf("CUSTOM_REGION_VERSION %u 64\n",custom_icnt_queue::enabled_flag()?3:2);
     for(const auto &p:windows) {
       const auto &w=p.second; assert(!w.open);
       std::printf("CUSTOM_REGION_WINDOW %llu %llu %llu\n",p.first,w.start,w.stop);
+      if(custom_icnt_queue::enabled_flag()) {
+        std::printf("CUSTOM_REGION_ICNT_WINDOW %llu %llu %llu %llu %llu %llu\n",p.first,
+          w.icnt_first,w.icnt_last,w.icnt_ticks,w.icnt_heads,w.icnt_grants);
+        for(const auto &q:w.icnt_samples)
+          std::printf("CUSTOM_REGION_ICNT_QUEUE %llu %llu %u %u %u %u %u %u %u\n",p.first,
+            q.tick,q.ports,q.active_bound,q.all_matching,q.ready_matching,q.head_matching,q.grants,q.queued);
+        for(const auto &d:w.icnt_destinations)
+          std::printf("CUSTOM_REGION_ICNT_DEST %llu %u %llu %llu %llu %llu\n",p.first,d.first,
+            d.second[0],d.second[1],d.second[2],d.second[3]);
+        for(const auto &m:w.icnt_missed)
+          std::printf("CUSTOM_REGION_ICNT_MISSED %llu %llu %llu %llu\n",p.first,m[0],m[1],m[2]);
+      }
       for(const auto &c:w.counts)
         std::printf("CUSTOM_REGION_COUNT %llu %u %u %u %llu %llu\n",p.first,
           std::get<0>(c.first),std::get<1>(c.first),std::get<2>(c.first),std::get<3>(c.first),c.second);
