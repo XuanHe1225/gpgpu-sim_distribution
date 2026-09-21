@@ -2371,6 +2371,7 @@ mem_stage_stall_type ldst_unit::process_cache_access(
               "LDGSTS instruction at PC %llx with uid %d is done, removing "
               "it from the pending LDGSTS map and unsetting the DEPBAR\n",
               inst.pc, inst.get_uid());
+          m_core->warp_inst_complete(inst);
           m_pending_ldgsts[inst.warp_id()].erase(inst.get_uid());
           m_core->unset_depbar(inst);
         }
@@ -2527,6 +2528,7 @@ void ldst_unit::L1_latency_queue_cycle() {
                   "LDGSTS instruction at PC %llx with uid %d is done, removing "
                   "it from the pending LDGSTS map and unsetting the DEPBAR\n",
                   mf_next->get_inst().pc, mf_next->get_inst().get_uid());
+              m_core->warp_inst_complete(mf_next->get_inst());
               m_pending_ldgsts[mf_next->get_inst().warp_id()].erase(
                   mf_next->get_inst().get_uid());
               m_core->unset_depbar(mf_next->get_inst());
@@ -3734,7 +3736,16 @@ void ldst_unit::cycle() {
           }
         }
         if (!pending_requests) {
-          m_core->warp_inst_complete(*m_dispatch_reg);
+          // Async loads have no destination register. Count them here only
+          // when issue created zero requests; real requests complete at their
+          // final response/hit. An absent entry has already completed there.
+          bool count_completion = !pipe_reg.m_is_ldgsts;
+          if (pipe_reg.m_is_ldgsts) {
+            const auto &pending = m_pending_ldgsts[warp_id];
+            auto found = pending.find(pipe_reg.get_uid());
+            count_completion = found != pending.end() && found->second == 0;
+          }
+          if (count_completion) m_core->warp_inst_complete(*m_dispatch_reg);
           m_scoreboard->releaseRegisters(m_dispatch_reg);
 
           // release LDGSTS
