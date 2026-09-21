@@ -3120,7 +3120,10 @@ void ldst_unit::issue(register_set &reg_set) {
 }
 
 bool ldst_unit::writeback_complete(warp_inst_t &inst) {
-  bool insn_completed = false;
+  // Shared pipeline retirement completes the instruction even when its
+  // destination is RZ (including predicated-off LDS). Register release is
+  // independent of completion accounting; no timing or queue policy changes.
+  bool insn_completed = inst.space.get_type() == shared_space;
   for (unsigned r = 0; r < MAX_OUTPUT_VALUES; r++) {
     if (inst.out[r] > 0) {
       if (inst.space.get_type() != shared_space) {
