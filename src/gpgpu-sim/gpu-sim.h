@@ -217,6 +217,7 @@ class memory_config {
     m_valid = false;
     gpgpu_dram_timing_opt = NULL;
     gpgpu_L2_queue_config = NULL;
+    custom_dram_sid_bank_groups = false;
     gpgpu_ctx = ctx;
   }
   void init(const shader_core_config *shader_config = nullptr) {
@@ -277,6 +278,15 @@ class memory_config {
       option_parser_destroy(dram_opp);
     }
 
+    // Opt-in HBM2e 8-Hi approximation: {SID, BA[3:0]}, four BGs per SID.
+    // Keep the existing pch-wide bus/turnaround/activation constraints.
+    if (custom_dram_sid_bank_groups &&
+        (nbk != 32 || nbkgrp != 8 || dram_bnk_indexing_policy != 0 ||
+         dram_bnkgrp_indexing_policy != 1)) {
+      fprintf(stderr, "custom_dram_sid_bank_groups requires 32 banks, 8 BG "
+                      "domains, linear bank indexing and lower-bit BG policy\n");
+      abort();
+    }
     int nbkt = nbk / nbkgrp;
     unsigned i;
     for (i = 0; nbkt > 0; i++) {
@@ -396,6 +406,7 @@ class memory_config {
   unsigned busW;
 
   unsigned nbkgrp;  // number of bank groups (has to be power of 2)
+  bool custom_dram_sid_bank_groups;  // BG domain = 4*SID + (BA & 3)
   unsigned
       bk_tag_length;  // number of bits that define a bank inside a bank group
 
@@ -549,6 +560,7 @@ class gpgpu_sim_config : public power_config,
 
   friend class gpgpu_sim;
   friend class sst_gpgpu_sim;
+  friend class custom_dram_sid_test;
 };
 
 struct occupancy_stats {

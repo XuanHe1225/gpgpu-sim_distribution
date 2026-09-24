@@ -112,7 +112,9 @@ dram_t::dram_t(unsigned int partition_id, const memory_config *config,
   for (unsigned i = 1; i < m_config->nbk; i++) bk[i] = bk[0] + i;
   for (unsigned i = 0; i < m_config->nbk; i++) {
     bk[i]->state = BANK_IDLE;
-    bk[i]->bkgrpindex = i / (m_config->nbk / m_config->nbkgrp);
+    bk[i]->bkgrpindex = m_config->custom_dram_sid_bank_groups
+                           ? get_bankgrp_number(i)
+                           : i / (m_config->nbk / m_config->nbkgrp);
   }
   prio = 0;
 
@@ -907,6 +909,10 @@ void dram_t::set_dram_power_stats(unsigned &cmd, unsigned &activity,
 }
 
 unsigned dram_t::get_bankgrp_number(unsigned i) {
+  if (m_config->custom_dram_sid_bank_groups) {
+    assert(i < 32);
+    return ((i >> 4) << 2) | (i & 3);
+  }
   if (m_config->dram_bnkgrp_indexing_policy == HIGHER_BITS) {  // higher bits
     return i >> m_config->bk_tag_length;
   } else if (m_config->dram_bnkgrp_indexing_policy ==

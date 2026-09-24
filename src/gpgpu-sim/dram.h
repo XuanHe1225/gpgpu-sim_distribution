@@ -247,6 +247,7 @@ class dram_t {
   class Stats *mrqq_Dist;  // memory request queue inside DRAM
 
   friend class frfcfs_scheduler;
+  friend class custom_dram_sid_test;
 };
 
 #endif /*DRAM_H*/

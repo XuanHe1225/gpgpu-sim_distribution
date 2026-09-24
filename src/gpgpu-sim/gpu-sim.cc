@@ -333,6 +333,9 @@ void memory_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-dram_seperate_write_queue_enable", OPT_BOOL,
                          &seperate_write_queue_enabled,
                          "Seperate_Write_Queue_Enable", "0");
+  option_parser_register(opp, "-custom_dram_sid_bank_groups", OPT_BOOL,
+                         &custom_dram_sid_bank_groups,
+                         "HBM2e 8-Hi BG timing domain = 4*SID + (BA & 3)", "0");
   option_parser_register(opp, "-dram_write_queue_size", OPT_CSTR,
                          &write_queue_size_opt, "Write_Queue_Size", "32:28:16");
   option_parser_register(
