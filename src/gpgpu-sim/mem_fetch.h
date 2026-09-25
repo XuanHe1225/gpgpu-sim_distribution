@@ -35,6 +35,7 @@
 #include <vector>
 #include "../abstract_hardware_model.h"
 #include "addrdec.h"
+#include "custom_sector_transfer.h"
 
 enum mf_type {
   READ_REQUEST = 0,
@@ -84,6 +85,23 @@ class mem_fetch {
   bool is_read_reply() const { return m_type == READ_REPLY; }
   bool is_write_ack() const { return m_type == WRITE_ACK; }
   bool is_reply() const { return is_read_reply() || is_write_ack(); }
+  // Set only by the LSU's actual bypass branch, not inferred from an opcode.
+  void custom_mark_bypass_global_read() {
+    custom_bypass_read = m_inst && !m_inst->empty() && m_inst->is_load() &&
+        m_inst->space.get_type() == global_space &&
+        m_access.get_type() == GLOBAL_ACC_R && !get_is_write() &&
+        !isatomic() && !m_access.is_tma() && !m_inst->is_tma() &&
+        m_data_size == 32 && !(get_addr() & 31);
+  }
+  bool custom_bypass_global_read() const { return custom_bypass_read; }
+  custom_sector_transfer::Sector custom_transfer_info() const {
+    custom_sector_transfer::Sector info;
+    if (custom_bypass_read && (m_type == READ_REQUEST || m_type == READ_REPLY)) {
+      info.eligible = true; info.address = get_addr();
+      info.instruction = m_inst->get_uid(); info.shader = m_sid; info.warp = m_wid;
+    }
+    return info;
+  }
   void do_atomic();
 
   void print(FILE *fp, bool print_inst = true) const;
@@ -158,6 +176,7 @@ class mem_fetch {
   static void operator delete(void *ptr) noexcept;
 
  private:
+  bool custom_bypass_read = false;
   static std::vector<void *> s_free_list;
   // request source information
   unsigned m_request_uid;

@@ -67,5 +67,8 @@ enum network_mode { INTERSIM = 1, LOCAL_XBAR = 2, N_NETWORK_MODE };
 
 void icnt_wrapper_init();
 void icnt_reg_options(class OptionParser* opp);
+// Optional local-PERFECT throughput experiment; other modes keep width 1.
+unsigned custom_icnt_return_width();
+void* custom_icnt_peek(unsigned output);
 
 #endif

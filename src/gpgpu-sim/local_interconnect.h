@@ -33,6 +33,7 @@
 #include <map>
 #include <memory>
 #include "custom_icnt_queue_observation.h"
+#include "custom_sector_transfer.h"
 #include <queue>
 #include <vector>
 using namespace std;
@@ -47,6 +48,8 @@ enum Arbiteration_type {
 
 struct inct_config {
   bool custom_icnt_round_robin = false;
+  bool custom_icnt_sector_pack = false;
+  unsigned custom_icnt_return_width = 1;
   // config for local interconnect
   unsigned in_buffer_limit;
   unsigned out_buffer_limit;
@@ -64,7 +67,10 @@ class xbar_router {
   ~xbar_router();
   void Push(unsigned input_deviceID, unsigned output_deviceID, void* data,
             unsigned int size);
+  void Push(unsigned input_deviceID, unsigned output_deviceID, void* data,
+            unsigned int size, const custom_sector_transfer::Sector &sector);
   void* Pop(unsigned ouput_deviceID);
+  void* Peek(unsigned output_deviceID) const;
   void Advance();
 
   bool Busy() const;
@@ -84,6 +90,7 @@ class xbar_router {
   unsigned long long in_buffer_full;
   unsigned long long in_buffer_util;
   unsigned long long packets_num;
+  custom_sector_transfer::Counters custom_transfers;
 
  private:
   std::unique_ptr<custom_icnt_queue::Census> custom_queue_census;
@@ -93,12 +100,14 @@ class xbar_router {
   void Perfect_Advance();
 
   struct Packet {
-    Packet(void* m_data, unsigned m_output_deviceID) {
+    Packet(void* m_data, unsigned m_output_deviceID,
+           const custom_sector_transfer::Sector &info = {}) : sector(info) {
       data = m_data;
       output_deviceID = m_output_deviceID;
     }
     void* data;
     unsigned output_deviceID;
+    custom_sector_transfer::Sector sector;
   };
   vector<queue<Packet> > in_buffers;
   vector<queue<Packet> > out_buffers;
@@ -115,6 +124,7 @@ class xbar_router {
   unsigned grant_cycles;
   unsigned grant_cycles_count;
   bool custom_icnt_round_robin;
+  bool custom_icnt_sector_pack = false;
 
   friend class LocalInterconnect;
 };
@@ -130,7 +140,10 @@ class LocalInterconnect {
   void Init();
   void Push(unsigned input_deviceID, unsigned output_deviceID, void* data,
             unsigned int size);
+  void Push(unsigned input_deviceID, unsigned output_deviceID, void* data,
+            unsigned int size, const custom_sector_transfer::Sector &sector);
   void* Pop(unsigned ouput_deviceID);
+  void* Peek(unsigned output_deviceID) const;
   void Advance();
   bool Busy() const;
   bool HasBuffer(unsigned deviceID, unsigned int size) const;

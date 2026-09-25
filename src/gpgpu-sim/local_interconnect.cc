@@ -51,6 +51,12 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
   verbose = m_localinct_config.verbose;
   grant_cycles = m_localinct_config.grant_cycles;
   custom_icnt_round_robin = m_localinct_config.custom_icnt_round_robin;
+  custom_icnt_sector_pack = m_localinct_config.custom_icnt_sector_pack;
+  const unsigned width = m_localinct_config.custom_icnt_return_width;
+  if ((width != 1 && width != 4) || (width == 4 && !custom_icnt_sector_pack) ||
+      (custom_icnt_sector_pack && (m_localinct_config.arbiter_algo != PERFECT ||
+                                  m_localinct_config.subnets != 2)))
+    throw std::invalid_argument("custom sector transfers require local PERFECT, two subnets, packing for width 4");
   grant_cycles_count = m_localinct_config.grant_cycles;
   in_buffers.resize(total_nodes);
   out_buffers.resize(total_nodes);
@@ -88,8 +94,14 @@ xbar_router::~xbar_router() {}
 
 void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
                        void* data, unsigned int size) {
+  Push(input_deviceID, output_deviceID, data, size, {});
+}
+
+void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
+                       void* data, unsigned int size,
+                       const custom_sector_transfer::Sector &sector) {
   assert(input_deviceID < total_nodes);
-  in_buffers[input_deviceID].push(Packet(data, output_deviceID));
+  in_buffers[input_deviceID].push(Packet(data, output_deviceID, sector));
   packets_num++;
   custom_dram_progress::network_packet(data,m_id,0);
   if(custom_queue_census) {
@@ -110,6 +122,11 @@ void* xbar_router::Pop(unsigned ouput_deviceID) {
   }
 
   return data;
+}
+
+void* xbar_router::Peek(unsigned output_deviceID) const {
+  assert(output_deviceID < total_nodes);
+  return out_buffers[output_deviceID].empty() ? nullptr : out_buffers[output_deviceID].front().data;
 }
 
 bool xbar_router::Has_Buffer_In(unsigned input_deviceID, unsigned size,
@@ -208,6 +225,23 @@ void xbar_router::Perfect_Advance() {
         custom_queue_depart(node_id,_packet.output_deviceID);
         in_buffers[node_id].pop();
         ++reqs;
+        unsigned sectors = _packet.sector.valid() ? 1 : 0;
+        unsigned used = _packet.sector.bit();
+        // Only the immediate prefix can share this scheduling opportunity.
+        // All queue entries and downstream L2 accesses remain original sectors.
+        if (custom_icnt_sector_pack && router_type == REQ_NET && sectors) {
+          for (unsigned n = 1; n < 4 && !in_buffers[node_id].empty(); ++n) {
+            const Packet next = in_buffers[node_id].front();
+            if (next.output_deviceID != _packet.output_deviceID ||
+                !next.sector.matches(_packet.sector, used)) break;
+            if (!Has_Buffer_Out(next.output_deviceID, 1)) break;
+            out_buffers[next.output_deviceID].push(next);
+            custom_queue_depart(node_id, next.output_deviceID);
+            in_buffers[node_id].pop();
+            used |= next.sector.bit(); ++sectors; ++reqs;
+          }
+        }
+        custom_transfers.add(sectors);
       } else {
         out_buffer_full++;
         custom_dram_progress::network_packet(_packet.data,m_id,3);
@@ -442,6 +476,12 @@ void LocalInterconnect::Init() {
 
 void LocalInterconnect::Push(unsigned input_deviceID, unsigned output_deviceID,
                              void* data, unsigned int size) {
+  Push(input_deviceID, output_deviceID, data, size, {});
+}
+
+void LocalInterconnect::Push(unsigned input_deviceID, unsigned output_deviceID,
+                             void* data, unsigned int size,
+                             const custom_sector_transfer::Sector &sector) {
   unsigned subnet;
   if (n_subnets == 1) {
     subnet = 0;
@@ -458,7 +498,7 @@ void LocalInterconnect::Push(unsigned input_deviceID, unsigned output_deviceID,
   // no flits are implemented
   assert(net[subnet]->Has_Buffer_In(input_deviceID, 1));
 
-  net[subnet]->Push(input_deviceID, output_deviceID, data, size);
+  net[subnet]->Push(input_deviceID, output_deviceID, data, size, sector);
 }
 
 void* LocalInterconnect::Pop(unsigned ouput_deviceID) {
@@ -467,6 +507,10 @@ void* LocalInterconnect::Pop(unsigned ouput_deviceID) {
   if (ouput_deviceID < n_shader) subnet = 1;
 
   return net[subnet]->Pop(ouput_deviceID);
+}
+
+void* LocalInterconnect::Peek(unsigned output_deviceID) const {
+  return net[output_deviceID < n_shader ? REPLY_NET : REQ_NET]->Peek(output_deviceID);
 }
 
 bool xbar_router::Has_Packet(unsigned output_deviceID) const {
@@ -508,6 +552,7 @@ void LocalInterconnect::DisplayStats() const {
     printf("custom_icnt_totals subnet=%u injected=%llu granted=%llu cycles=%llu active=%llu busy=%u\n",
            i, net[i]->packets_num, net[i]->reqs_util, net[i]->cycles,
            net[i]->cycles_util, static_cast<unsigned>(net[i]->Busy()));
+    net[i]->custom_transfers.print(i == REQ_NET ? "request_xbar" : "reply_xbar");
   }
   printf("Req_Network_injected_packets_num = %lld\n",
          net[REQ_NET]->packets_num);

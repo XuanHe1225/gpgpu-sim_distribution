@@ -31,6 +31,7 @@
 #include "../intersim2/globals.hpp"
 #include "../intersim2/interconnect_interface.hpp"
 #include "local_interconnect.h"
+#include "mem_fetch.h"
 #include <stdexcept>
 
 icnt_create_p icnt_create;
@@ -113,7 +114,14 @@ static bool LocalInterconnect_has_buffer(unsigned input, unsigned int size) {
 
 static void LocalInterconnect_push(unsigned input, unsigned output, void* data,
                                    unsigned int size) {
-  g_localicnt_interface->Push(input, output, data, size);
+  g_localicnt_interface->Push(input, output, data, size,
+                             static_cast<mem_fetch*>(data)->custom_transfer_info());
+}
+
+unsigned custom_icnt_return_width() { return g_inct_config.custom_icnt_return_width; }
+void* custom_icnt_peek(unsigned output) {
+  assert(g_network_mode == LOCAL_XBAR);
+  return g_localicnt_interface->Peek(output);
 }
 
 static void* LocalInterconnect_pop(unsigned output) {
@@ -154,6 +162,12 @@ void icnt_reg_options(class OptionParser* opp) {
                          "Interconnection network config file", "mesh");
 
   // parameters for local xbar
+  option_parser_register(opp, "-custom_icnt_sector_pack", OPT_BOOL,
+                         &g_inct_config.custom_icnt_sector_pack,
+                         "Group up to four same-line bypass read sectors in local PERFECT", "0");
+  option_parser_register(opp, "-custom_icnt_return_width", OPT_UINT32,
+                         &g_inct_config.custom_icnt_return_width,
+                         "Eligible sector responses per receive stage: 1 or experimental 4", "1");
   option_parser_register(opp, "-icnt_in_buffer_limit", OPT_UINT32,
                          &g_inct_config.in_buffer_limit, "in_buffer_limit",
                          "64");
@@ -177,6 +191,9 @@ void icnt_reg_options(class OptionParser* opp) {
 }
 
 void icnt_wrapper_init() {
+  if ((g_inct_config.custom_icnt_sector_pack || g_inct_config.custom_icnt_return_width != 1) &&
+      g_network_mode != LOCAL_XBAR)
+    throw std::invalid_argument("custom sector transfers require local PERFECT interconnect");
   if(custom_icnt_queue::enabled_flag() && g_network_mode!=2)
     throw std::invalid_argument("custom_icnt_queue_observation requires local interconnect");
   switch (g_network_mode) {

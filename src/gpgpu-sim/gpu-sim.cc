@@ -1748,6 +1748,7 @@ void gpgpu_sim::gpu_print_stat(unsigned long long streamID) {
 
   pnm_paths::observations().print();
   custom_async_path::observations().print();
+  custom_sector_transfer::print();
   custom_region::observations().print();
   custom_dram_progress::observations().print(global_cycle());
   printf("kernel_stream_id = %llu\n", streamID);
