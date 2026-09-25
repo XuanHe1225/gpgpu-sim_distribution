@@ -1,3 +1,4 @@
+#include "custom_async_path.h"
 #include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, Ali Bakhoda,
 // George L. Yuan, Andrew Turner, Inderpreet Singh, Vijay Kandiah, Nikos
@@ -1133,6 +1134,16 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
   pnm_events::instruction("issue", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                           **pipe_reg, m_sid, true);
 
+  if (custom_async_path::enabled()) {
+    const auto &inst = **pipe_reg;
+    const auto cta = inst.get_cuda_cta_id();
+    auto *kernel = m_warp[warp_id]->get_kernel_info();
+    custom_async_path::observations().issue(kernel->name(), inst.get_uid(),
+        kernel->get_uid(), m_sid, warp_id, cta.x, cta.y, cta.z, inst.pc,
+        inst.m_is_ldgsts ? 1 : inst.m_is_depbar ? 2 : inst.op == BARRIER_OP ? 3 : 0,
+        m_warp[warp_id]->m_ldgdepbar_id, m_gpu->global_cycle());
+  }
+
   // Add LDGSTS instructions into a buffer
   unsigned int ldgdepbar_id = m_warp[warp_id]->m_ldgdepbar_id;
   if (next_inst->m_is_ldgsts) {
@@ -1238,6 +1249,7 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       if (done_flag) {
         if (m_warp[warp_id]->m_waiting_ldgsts) {
           m_warp[warp_id]->m_waiting_ldgsts = false;
+          custom_async_path::observations().wait_release(m_sid, warp_id, m_gpu->global_cycle());
         }
       }
     } else if (m_warp[warp_id]->is_last_depbar_group_type_tma()) {
@@ -2208,12 +2220,14 @@ void shader_core_ctx::unset_depbar(const warp_inst_t &inst) {
     if (done_flag) {
       if (m_warp[inst.warp_id()]->m_waiting_ldgsts) {
         m_warp[inst.warp_id()]->m_waiting_ldgsts = false;
+        custom_async_path::observations().wait_release(m_sid, inst.warp_id(), m_gpu->global_cycle());
       }
     }
   }
 }
 
 void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
+  if (inst.m_is_ldgsts) custom_async_path::observations().complete(inst.get_uid(), m_gpu->global_cycle());
   custom_timing::observations().finish(inst.get_uid(), m_gpu->global_cycle());
   pnm_events::instruction("complete", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                           inst, m_sid, false);
@@ -4963,6 +4977,10 @@ void barrier_set_t::warp_reaches_barrier(unsigned cta_id, unsigned warp_id,
       m_bar_id_to_warps[bar_id] &= ~at_sync;
       m_bar_id_to_warps_arrive[bar_id] &= ~at_arrive;
       m_warp_at_barrier &= ~at_sync;
+      if (custom_async_path::enabled())
+        for (unsigned w = 0; w < m_max_warps_per_core; ++w)
+          if (at_sync.test(w)) custom_async_path::observations().barrier_release(
+              m_shader->get_sid(), w, m_shader->get_gpu()->global_cycle());
       if (bar_type == RED) {
         m_shader->broadcast_barrier_reduction(cta_id, bar_id, at_sync);
       }
@@ -4978,6 +4996,10 @@ void barrier_set_t::warp_reaches_barrier(unsigned cta_id, unsigned warp_id,
       m_bar_id_to_warps[bar_id] &= ~at_sync;
       m_bar_id_to_warps_arrive[bar_id] &= ~at_arrive;
       m_warp_at_barrier &= ~at_sync;
+      if (custom_async_path::enabled())
+        for (unsigned w = 0; w < m_max_warps_per_core; ++w)
+          if (at_sync.test(w)) custom_async_path::observations().barrier_release(
+              m_shader->get_sid(), w, m_shader->get_gpu()->global_cycle());
       if (bar_type == RED) {
         m_shader->broadcast_barrier_reduction(cta_id, bar_id, at_sync);
       }
@@ -5008,6 +5030,10 @@ void barrier_set_t::warp_exit(unsigned warp_id) {
       m_bar_id_to_warps[i] &= ~at_sync;
       m_bar_id_to_warps_arrive[i] &= ~at_arrive;
       m_warp_at_barrier &= ~at_sync;
+      if (custom_async_path::enabled())
+        for (unsigned w = 0; w < m_max_warps_per_core; ++w)
+          if (at_sync.test(w)) custom_async_path::observations().barrier_release(
+              m_shader->get_sid(), w, m_shader->get_gpu()->global_cycle());
     }
   }
 }

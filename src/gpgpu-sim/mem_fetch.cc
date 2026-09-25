@@ -1,3 +1,4 @@
+#include "custom_async_path.h"
 #include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2011, Tor M. Aamodt
 // The University of British Columbia
@@ -195,6 +196,7 @@ mem_fetch::mem_fetch(const mem_access_t &access,
 }
 
 mem_fetch::~mem_fetch() {
+  if (custom_async_path::enabled()) custom_async_path::observations().finish_request(get_request_uid(), pnm_events::cycle(this));
   custom_region::observations().destroyed(get_access_type(),m_access.is_write());
   if(custom_dram_progress::enabled_flag())
     custom_dram_progress::observations().destroyed(get_sid(),get_access_type(),m_status,get_data_size(),pnm_events::cycle(this));
@@ -250,6 +252,9 @@ void mem_fetch::set_status(enum mem_fetch_status status,
     pnm_events::request("status", cycle, this, Status_str[status]);
   if(custom_dram_progress::enabled_flag())
     custom_dram_progress::observations().transition(get_sid(),get_access_type(),m_status,status,get_data_size(),pnm_events::cycle(this));
+  if (custom_async_path::enabled() && m_inst && m_inst->m_is_ldgsts)
+    custom_async_path::observations().request(get_request_uid(), m_inst->get_uid(),
+        status, pnm_events::cycle(this), get_data_size());
   m_status = status;
   m_status_change = cycle;
 }

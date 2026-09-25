@@ -1,3 +1,4 @@
+#include "custom_async_path.h"
 #include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, George L. Yuan,
 // Ali Bakhoda, Andrew Turner, Ivan Sham, Vijay Kandiah, Nikos Hardavellas,
@@ -1746,6 +1747,7 @@ void gpgpu_sim::gpu_print_stat(unsigned long long streamID) {
   fprintf(statfout, "%s", kernel_info_str.c_str());
 
   pnm_paths::observations().print();
+  custom_async_path::observations().print();
   custom_region::observations().print();
   custom_dram_progress::observations().print(global_cycle());
   printf("kernel_stream_id = %llu\n", streamID);
