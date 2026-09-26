@@ -162,6 +162,9 @@ void icnt_reg_options(class OptionParser* opp) {
                          "Interconnection network config file", "mesh");
 
   // parameters for local xbar
+  option_parser_register(opp, "-custom_icnt_perfect_fair", OPT_BOOL,
+                         &g_inct_config.custom_icnt_perfect_fair,
+                         "Per-output round-robin among local PERFECT FIFO heads", "0");
   option_parser_register(opp, "-custom_icnt_sector_pack", OPT_BOOL,
                          &g_inct_config.custom_icnt_sector_pack,
                          "Group up to four same-line bypass read sectors in local PERFECT", "0");
@@ -191,6 +194,8 @@ void icnt_reg_options(class OptionParser* opp) {
 }
 
 void icnt_wrapper_init() {
+  if (g_inct_config.custom_icnt_perfect_fair && g_network_mode != LOCAL_XBAR)
+    throw std::invalid_argument("custom fair arbitration requires local PERFECT interconnect");
   if ((g_inct_config.custom_icnt_sector_pack || g_inct_config.custom_icnt_return_width != 1) &&
       g_network_mode != LOCAL_XBAR)
     throw std::invalid_argument("custom sector transfers require local PERFECT interconnect");

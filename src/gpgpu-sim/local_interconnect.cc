@@ -52,6 +52,17 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
   grant_cycles = m_localinct_config.grant_cycles;
   custom_icnt_round_robin = m_localinct_config.custom_icnt_round_robin;
   custom_icnt_sector_pack = m_localinct_config.custom_icnt_sector_pack;
+  custom_icnt_perfect_fair = m_localinct_config.custom_icnt_perfect_fair;
+  if (custom_icnt_perfect_fair &&
+      (m_localinct_config.arbiter_algo != PERFECT || m_localinct_config.subnets != 2 ||
+       n_shader == 0 || n_mem == 0))
+    throw std::invalid_argument("custom fair arbitration requires local PERFECT and two nonempty subnets");
+  if (custom_icnt_perfect_fair) {
+    custom_fair_head.resize(total_nodes);
+    custom_fair_tail.resize(total_nodes);
+    custom_fair_link.resize(total_nodes);
+    custom_fair_stats.resize(total_nodes);
+  }
   const unsigned width = m_localinct_config.custom_icnt_return_width;
   if ((width != 1 && width != 4) || (width == 4 && !custom_icnt_sector_pack) ||
       (custom_icnt_sector_pack && (m_localinct_config.arbiter_algo != PERFECT ||
@@ -101,6 +112,11 @@ void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
                        void* data, unsigned int size,
                        const custom_sector_transfer::Sector &sector) {
   assert(input_deviceID < total_nodes);
+  if (custom_icnt_perfect_fair) {
+    assert((input_deviceID < _n_shader) == (router_type == REQ_NET));
+    assert(output_deviceID < total_nodes);
+    assert((output_deviceID >= _n_shader) == (router_type == REQ_NET));
+  }
   in_buffers[input_deviceID].push(Packet(data, output_deviceID, sector));
   packets_num++;
   custom_dram_progress::network_packet(data,m_id,0);
@@ -213,6 +229,10 @@ void xbar_router::Advance() {
 }
 
 void xbar_router::Perfect_Advance() {
+  if (custom_icnt_perfect_fair) {
+    Perfect_Fair_Advance();
+    return;
+  }
   bool active = false;
   unsigned reqs = 0;
   for (unsigned i = 0; i < total_nodes; i++) {
@@ -261,6 +281,86 @@ void xbar_router::Perfect_Advance() {
   }
   ++cycles;
 };
+
+void xbar_router::Perfect_Fair_Advance() {
+  const unsigned input_begin = router_type == REQ_NET ? 0 : _n_shader;
+  const unsigned input_end = router_type == REQ_NET ? _n_shader : total_nodes;
+  const unsigned output_begin = router_type == REQ_NET ? _n_shader : 0;
+  const unsigned output_end = router_type == REQ_NET ? total_nodes : _n_shader;
+  const unsigned none = total_nodes;
+  std::fill(custom_fair_head.begin(), custom_fair_head.end(), none);
+  bool active = false;
+  unsigned reqs = 0;
+
+  // Build destination lists once from the tick-start FIFO heads. O(nodes),
+  // instead of probing every input separately for every output.
+  for (unsigned input = input_begin; input < input_end; ++input) {
+    if (in_buffers[input].empty()) {
+      custom_fair_stats[input].consecutive_wait = 0;
+      continue;
+    }
+    active = true;
+    const unsigned dest = in_buffers[input].front().output_deviceID;
+    if (custom_fair_head[dest] == none) custom_fair_head[dest] = input;
+    else custom_fair_link[custom_fair_tail[dest]] = input;
+    custom_fair_tail[dest] = input;
+    custom_fair_link[input] = none;
+  }
+  for (unsigned dest = output_begin; dest < output_end; ++dest) {
+    const unsigned first = custom_fair_head[dest];
+    if (first == none) continue;
+    unsigned start = first;
+    while (start != none && start < next_node[dest]) start = custom_fair_link[start];
+    if (start == none) start = first;
+    custom_fair_link[custom_fair_tail[dest]] = first;
+    unsigned input = start;
+    do {
+      auto &stats = custom_fair_stats[input];
+      const Packet packet = in_buffers[input].front();
+      assert(packet.output_deviceID == dest);
+      if (Has_Buffer_Out(dest, 1)) {
+        out_buffers[dest].push(packet);
+        custom_queue_depart(input, dest);
+        in_buffers[input].pop();
+        unsigned transferred = 1;
+        unsigned sectors = packet.sector.valid() ? 1 : 0;
+        unsigned used = packet.sector.bit();
+        if (custom_icnt_sector_pack && router_type == REQ_NET && sectors) {
+          for (unsigned n = 1; n < 4 && !in_buffers[input].empty(); ++n) {
+            const Packet next = in_buffers[input].front();
+            if (next.output_deviceID != dest || !next.sector.matches(packet.sector, used)) break;
+            if (!Has_Buffer_Out(dest, 1)) break;
+            out_buffers[dest].push(next);
+            custom_queue_depart(input, dest);
+            in_buffers[input].pop();
+            used |= next.sector.bit();
+            ++sectors; ++transferred;
+          }
+        }
+        custom_transfers.add(sectors);
+        reqs += transferred;
+        ++stats.grants;
+        stats.sectors += transferred;
+        stats.consecutive_wait = 0;
+        // Independent output cursor, advanced only by a successful grant.
+        next_node[dest] = input + 1 == input_end ? input_begin : input + 1;
+      } else {
+        ++out_buffer_full;
+        ++stats.wait_ticks;
+        stats.max_wait = std::max(stats.max_wait, ++stats.consecutive_wait);
+        custom_dram_progress::network_packet(packet.data, m_id, 3);
+      }
+      input = custom_fair_link[input];
+    } while (input != start);
+  }
+  if (active) ++cycles_util;
+  reqs_util += reqs;
+  for (unsigned i = 0; i < total_nodes; ++i) {
+    in_buffer_util += in_buffers[i].size();
+    out_buffer_util += out_buffers[i].size();
+  }
+  ++cycles;
+}
 
 void xbar_router::RR_Advance() {
   bool active = false;
@@ -553,6 +653,15 @@ void LocalInterconnect::DisplayStats() const {
            i, net[i]->packets_num, net[i]->reqs_util, net[i]->cycles,
            net[i]->cycles_util, static_cast<unsigned>(net[i]->Busy()));
     net[i]->custom_transfers.print(i == REQ_NET ? "request_xbar" : "reply_xbar");
+    if (net[i]->custom_icnt_perfect_fair) {
+      const unsigned begin = i == REQ_NET ? 0 : n_shader;
+      const unsigned end = i == REQ_NET ? n_shader : n_shader + n_mem;
+      for (unsigned input = begin; input < end; ++input) {
+        const auto &s = net[i]->custom_fair_stats[input];
+        printf("custom_icnt_fair subnet=%u input=%u grants=%llu sectors=%llu wait_ticks=%llu max_wait=%llu\n",
+               i, input, s.grants, s.sectors, s.wait_ticks, s.max_wait);
+      }
+    }
   }
   printf("Req_Network_injected_packets_num = %lld\n",
          net[REQ_NET]->packets_num);

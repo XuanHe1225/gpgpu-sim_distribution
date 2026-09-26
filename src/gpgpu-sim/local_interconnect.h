@@ -48,6 +48,7 @@ enum Arbiteration_type {
 
 struct inct_config {
   bool custom_icnt_round_robin = false;
+  bool custom_icnt_perfect_fair = false;
   bool custom_icnt_sector_pack = false;
   unsigned custom_icnt_return_width = 1;
   // config for local interconnect
@@ -98,6 +99,7 @@ class xbar_router {
   void iSLIP_Advance();
   void RR_Advance();
   void Perfect_Advance();
+  void Perfect_Fair_Advance();
 
   struct Packet {
     Packet(void* m_data, unsigned m_output_deviceID,
@@ -125,6 +127,14 @@ class xbar_router {
   unsigned grant_cycles_count;
   bool custom_icnt_round_robin;
   bool custom_icnt_sector_pack = false;
+  bool custom_icnt_perfect_fair = false;
+  // Tick-start head lists, sorted by input ID. No input FIFO tail is searched.
+  vector<unsigned> custom_fair_head, custom_fair_tail, custom_fair_link;
+  struct FairStats {
+    unsigned long long grants = 0, sectors = 0, wait_ticks = 0;
+    unsigned long long consecutive_wait = 0, max_wait = 0;
+  };
+  vector<FairStats> custom_fair_stats;
 
   friend class LocalInterconnect;
 };
