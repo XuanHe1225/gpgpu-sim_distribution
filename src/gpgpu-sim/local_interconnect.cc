@@ -53,16 +53,22 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
   custom_icnt_round_robin = m_localinct_config.custom_icnt_round_robin;
   custom_icnt_sector_pack = m_localinct_config.custom_icnt_sector_pack;
   custom_icnt_perfect_fair = m_localinct_config.custom_icnt_perfect_fair;
-  if (custom_icnt_perfect_fair &&
+  custom_icnt_perfect_fair_eligible =
+      m_localinct_config.custom_icnt_perfect_fair_eligible;
+  if (custom_icnt_perfect_fair && custom_icnt_perfect_fair_eligible)
+    throw std::invalid_argument("custom fair modes are mutually exclusive");
+  if ((custom_icnt_perfect_fair || custom_icnt_perfect_fair_eligible) &&
       (m_localinct_config.arbiter_algo != PERFECT || m_localinct_config.subnets != 2 ||
        n_shader == 0 || n_mem == 0))
     throw std::invalid_argument("custom fair arbitration requires local PERFECT and two nonempty subnets");
-  if (custom_icnt_perfect_fair) {
+  if (custom_icnt_perfect_fair || custom_icnt_perfect_fair_eligible) {
     custom_fair_head.resize(total_nodes);
     custom_fair_tail.resize(total_nodes);
     custom_fair_link.resize(total_nodes);
     custom_fair_stats.resize(total_nodes);
   }
+  if (custom_icnt_perfect_fair_eligible)
+    custom_legacy_stats.resize(total_nodes);
   const unsigned width = m_localinct_config.custom_icnt_return_width;
   if ((width != 1 && width != 4) || (width == 4 && !custom_icnt_sector_pack) ||
       (custom_icnt_sector_pack && (m_localinct_config.arbiter_algo != PERFECT ||
@@ -112,7 +118,7 @@ void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
                        void* data, unsigned int size,
                        const custom_sector_transfer::Sector &sector) {
   assert(input_deviceID < total_nodes);
-  if (custom_icnt_perfect_fair) {
+  if (custom_icnt_perfect_fair || custom_icnt_perfect_fair_eligible) {
     assert((input_deviceID < _n_shader) == (router_type == REQ_NET));
     assert(output_deviceID < total_nodes);
     assert((output_deviceID >= _n_shader) == (router_type == REQ_NET));
@@ -233,6 +239,30 @@ void xbar_router::Perfect_Advance() {
     Perfect_Fair_Advance();
     return;
   }
+  if (custom_icnt_perfect_fair_eligible) {
+    const unsigned input_begin = router_type == REQ_NET ? 0 : _n_shader;
+    const unsigned input_end = router_type == REQ_NET ? _n_shader : total_nodes;
+    bool has_head = false;
+    bool all_heads_eligible = true;
+    for (unsigned input = input_begin; input < input_end; ++input) {
+      if (in_buffers[input].empty()) continue;
+      has_head = true;
+      if (!in_buffers[input].front().sector.valid()) {
+        all_heads_eligible = false;
+        break;
+      }
+    }
+    // A mixed tick stays on the legacy path. This is deliberately conservative:
+    // no FIFO tail is inspected and ordinary L1-miss traffic is unchanged.
+    if (has_head && all_heads_eligible) {
+      ++custom_fair_ticks;
+      for (auto &s : custom_legacy_stats) s.consecutive_wait = 0;
+      Perfect_Fair_Advance();
+      return;
+    }
+    ++custom_legacy_ticks;
+    for (auto &s : custom_fair_stats) s.consecutive_wait = 0;
+  }
   bool active = false;
   unsigned reqs = 0;
   for (unsigned i = 0; i < total_nodes; i++) {
@@ -245,6 +275,7 @@ void xbar_router::Perfect_Advance() {
         custom_queue_depart(node_id,_packet.output_deviceID);
         in_buffers[node_id].pop();
         ++reqs;
+        unsigned transferred = 1;
         unsigned sectors = _packet.sector.valid() ? 1 : 0;
         unsigned used = _packet.sector.bit();
         // Only the immediate prefix can share this scheduling opportunity.
@@ -258,14 +289,27 @@ void xbar_router::Perfect_Advance() {
             out_buffers[next.output_deviceID].push(next);
             custom_queue_depart(node_id, next.output_deviceID);
             in_buffers[node_id].pop();
-            used |= next.sector.bit(); ++sectors; ++reqs;
+            used |= next.sector.bit(); ++sectors; ++reqs; ++transferred;
           }
         }
         custom_transfers.add(sectors);
+        if (custom_icnt_perfect_fair_eligible) {
+          auto &stats = custom_legacy_stats[node_id];
+          ++stats.grants;
+          stats.sectors += transferred;
+          stats.consecutive_wait = 0;
+        }
       } else {
         out_buffer_full++;
+        if (custom_icnt_perfect_fair_eligible) {
+          auto &stats = custom_legacy_stats[node_id];
+          ++stats.wait_ticks;
+          stats.max_wait = std::max(stats.max_wait, ++stats.consecutive_wait);
+        }
         custom_dram_progress::network_packet(_packet.data,m_id,3);
       }
+    } else if (custom_icnt_perfect_fair_eligible) {
+      custom_legacy_stats[node_id].consecutive_wait = 0;
     }
   }
 
@@ -653,14 +697,22 @@ void LocalInterconnect::DisplayStats() const {
            i, net[i]->packets_num, net[i]->reqs_util, net[i]->cycles,
            net[i]->cycles_util, static_cast<unsigned>(net[i]->Busy()));
     net[i]->custom_transfers.print(i == REQ_NET ? "request_xbar" : "reply_xbar");
-    if (net[i]->custom_icnt_perfect_fair) {
+    if (net[i]->custom_icnt_perfect_fair || net[i]->custom_icnt_perfect_fair_eligible) {
       const unsigned begin = i == REQ_NET ? 0 : n_shader;
       const unsigned end = i == REQ_NET ? n_shader : n_shader + n_mem;
       for (unsigned input = begin; input < end; ++input) {
         const auto &s = net[i]->custom_fair_stats[input];
         printf("custom_icnt_fair subnet=%u input=%u grants=%llu sectors=%llu wait_ticks=%llu max_wait=%llu\n",
                i, input, s.grants, s.sectors, s.wait_ticks, s.max_wait);
+        if (net[i]->custom_icnt_perfect_fair_eligible) {
+          const auto &legacy = net[i]->custom_legacy_stats[input];
+          printf("custom_icnt_legacy subnet=%u input=%u grants=%llu sectors=%llu wait_ticks=%llu max_wait=%llu\n",
+                 i, input, legacy.grants, legacy.sectors, legacy.wait_ticks, legacy.max_wait);
+        }
       }
+      if (net[i]->custom_icnt_perfect_fair_eligible)
+        printf("custom_icnt_scope subnet=%u fair_ticks=%llu legacy_ticks=%llu\n",
+               i, net[i]->custom_fair_ticks, net[i]->custom_legacy_ticks);
     }
   }
   printf("Req_Network_injected_packets_num = %lld\n",

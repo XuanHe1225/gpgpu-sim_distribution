@@ -49,6 +49,7 @@ enum Arbiteration_type {
 struct inct_config {
   bool custom_icnt_round_robin = false;
   bool custom_icnt_perfect_fair = false;
+  bool custom_icnt_perfect_fair_eligible = false;
   bool custom_icnt_sector_pack = false;
   unsigned custom_icnt_return_width = 1;
   // config for local interconnect
@@ -128,6 +129,7 @@ class xbar_router {
   bool custom_icnt_round_robin;
   bool custom_icnt_sector_pack = false;
   bool custom_icnt_perfect_fair = false;
+  bool custom_icnt_perfect_fair_eligible = false;
   // Tick-start head lists, sorted by input ID. No input FIFO tail is searched.
   vector<unsigned> custom_fair_head, custom_fair_tail, custom_fair_link;
   struct FairStats {
@@ -135,6 +137,8 @@ class xbar_router {
     unsigned long long consecutive_wait = 0, max_wait = 0;
   };
   vector<FairStats> custom_fair_stats;
+  vector<FairStats> custom_legacy_stats;
+  unsigned long long custom_fair_ticks = 0, custom_legacy_ticks = 0;
 
   friend class LocalInterconnect;
 };
