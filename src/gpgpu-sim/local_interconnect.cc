@@ -55,6 +55,13 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
   custom_icnt_perfect_fair = m_localinct_config.custom_icnt_perfect_fair;
   custom_icnt_perfect_fair_eligible =
       m_localinct_config.custom_icnt_perfect_fair_eligible;
+  custom_icnt_perfect_request_source_rr =
+      m_localinct_config.custom_icnt_perfect_request_source_rr;
+  if (custom_icnt_perfect_request_source_rr &&
+      (custom_icnt_perfect_fair || custom_icnt_perfect_fair_eligible ||
+       m_localinct_config.arbiter_algo != PERFECT || m_localinct_config.subnets != 2 ||
+       n_shader == 0 || n_mem == 0))
+    throw std::invalid_argument("custom request source rotation requires exclusive local PERFECT and two nonempty subnets");
   if (custom_icnt_perfect_fair && custom_icnt_perfect_fair_eligible)
     throw std::invalid_argument("custom fair modes are mutually exclusive");
   if ((custom_icnt_perfect_fair || custom_icnt_perfect_fair_eligible) &&
@@ -313,7 +320,12 @@ void xbar_router::Perfect_Advance() {
     }
   }
 
-  next_node_id = (next_node_id + 1) % total_nodes;
+  // Only the request cursor excludes opposite-subnet inputs. Keep the cyclic
+  // scan, FIFO heads, transfer opportunities and reply arbitration unchanged.
+  const unsigned rotation_nodes =
+      custom_icnt_perfect_request_source_rr && router_type == REQ_NET
+          ? _n_shader : total_nodes;
+  next_node_id = (next_node_id + 1) % rotation_nodes;
 
   // Observe the unchanged upstream PERFECT transfers. In particular, multiple
   // inputs may reach one output in a tick; FIFO matching bounds do not apply.

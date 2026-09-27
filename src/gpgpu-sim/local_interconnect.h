@@ -50,6 +50,7 @@ struct inct_config {
   bool custom_icnt_round_robin = false;
   bool custom_icnt_perfect_fair = false;
   bool custom_icnt_perfect_fair_eligible = false;
+  bool custom_icnt_perfect_request_source_rr = false;
   bool custom_icnt_sector_pack = false;
   unsigned custom_icnt_return_width = 1;
   // config for local interconnect
@@ -130,6 +131,7 @@ class xbar_router {
   bool custom_icnt_sector_pack = false;
   bool custom_icnt_perfect_fair = false;
   bool custom_icnt_perfect_fair_eligible = false;
+  bool custom_icnt_perfect_request_source_rr = false;
   // Tick-start head lists, sorted by input ID. No input FIFO tail is searched.
   vector<unsigned> custom_fair_head, custom_fair_tail, custom_fair_link;
   struct FairStats {
