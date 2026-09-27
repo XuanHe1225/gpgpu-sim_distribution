@@ -1,4 +1,5 @@
 #include "custom_async_path.h"
+#include "custom_dram_progress.h"
 #include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, Ali Bakhoda,
 // George L. Yuan, Andrew Turner, Inderpreet Singh, Vijay Kandiah, Nikos
@@ -179,7 +180,8 @@ void shader_core_ctx::create_front_pipeline() {
       new shader_core_mem_fetch_allocator(m_sid, m_tpc, m_memory_config);
 
   // fetch
-  m_last_warp_fetched = 0;
+  m_last_warp_fetched = custom_warp_order::buffer_initial(
+      m_config->custom_warp_swizzle, m_sid, m_config->max_warps_per_shader);
 
 #define STRSIZE 1024
   char name[STRSIZE];
@@ -264,9 +266,10 @@ void shader_core_ctx::create_schedulers() {
   }
 
   for (unsigned i = 0; i < m_warp.size(); i++) {
-    // distribute i's evenly though schedulers;
-    schedulers[i % m_config->gpgpu_num_sched_per_core]->add_supervised_warp_id(
-        i);
+    const unsigned wid = custom_warp_order::slot(
+        m_config->custom_warp_swizzle, m_sid, m_warp.size(), i);
+    // Change priority only; each physical warp retains its scheduler owner.
+    schedulers[wid % m_config->gpgpu_num_sched_per_core]->add_supervised_warp_id(wid);
   }
   for (unsigned i = 0; i < m_config->gpgpu_num_sched_per_core; ++i) {
     schedulers[i]->done_adding_supervised_warps();
@@ -588,6 +591,8 @@ void shader_core_ctx::init_warps(unsigned cta_id, unsigned start_thread,
 
       m_warp[i]->init(start_pc, cta_id, i, active_threads, m_dynamic_warp_id,
                       kernel.get_streamID());
+      if(i==start_warp && custom_dram_progress::enabled_flag())
+        std::printf("CUSTOM_WARP_CTA %u %u %u %u %u\n",kernel_id,m_sid,ctaid,start_warp,end_warp);
       pnm_events::emit("warp_bind", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                        nullptr, m_sid, 0, 0, m_dynamic_warp_id, ctaid, i,
                        active_threads.to_ullong(), nullptr, "kernel", kernel_id);
@@ -967,8 +972,9 @@ void shader_core_ctx::fetch() {
       // already waiting on a cache miss and get next 1-2 instructions from
       // i-cache...
       for (unsigned i = 0; i < m_config->max_warps_per_shader; i++) {
-        unsigned warp_id =
-            (m_last_warp_fetched + 1 + i) % m_config->max_warps_per_shader;
+        unsigned warp_id = custom_warp_order::buffer_candidate(
+            m_config->custom_warp_swizzle, m_sid,
+            m_config->max_warps_per_shader, m_last_warp_fetched, i);
 
         // this code checks if this warp has finished executing and can be
         // reclaimed
@@ -1131,6 +1137,14 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
       (custom_region::U(warp_id)<<32)|next_inst->pc);
   m_stats->shader_cycle_distro[2 + (*pipe_reg)->active_count()]++;
   func_exec_inst(**pipe_reg);
+  if(custom_dram_progress::enabled_flag() && (*pipe_reg)->is_load() &&
+      (*pipe_reg)->space.get_type()==global_space) {
+    for(unsigned lane=0;lane<(*pipe_reg)->warp_size();++lane)if((*pipe_reg)->active(lane)) {
+      custom_dram_progress::observations().load_issue(m_sid,warp_id,(*pipe_reg)->pc,
+          (*pipe_reg)->get_addr(lane),m_gpu->global_cycle());
+      break;
+    }
+  }
   pnm_events::instruction("issue", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                           **pipe_reg, m_sid, true);
 

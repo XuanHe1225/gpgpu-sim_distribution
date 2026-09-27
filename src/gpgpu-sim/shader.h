@@ -1,4 +1,5 @@
 #include "custom_scalar_overlap.h"
+#include "custom_warp_swizzle.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, Andrew Turner,
 // Ali Bakhoda, Vijay Kandiah, Nikos Hardavellas,
 // Mahmoud Khairy, Junrui Pan, Timothy G. Rogers
@@ -2221,6 +2222,8 @@ class shader_core_config : public core_config {
     }
     max_warps_per_shader = n_thread_per_shader / warp_size;
     assert(!(n_thread_per_shader % warp_size));
+    custom_warp_order::validate(custom_warp_swizzle, max_warps_per_shader,
+                                gpgpu_num_sched_per_core, gpgpu_scheduler_string);
 
     set_pipeline_latency();
 
@@ -2316,6 +2319,7 @@ class shader_core_config : public core_config {
   bool pnm_simd_ready_boundary;
   bool custom_collector_fair_dispatch;
   bool custom_collector_local_round_robin;
+  unsigned custom_warp_swizzle;
   bool custom_collector_partitioned_allocation;
   bool gpgpu_dual_issue_diff_exec_units;
 

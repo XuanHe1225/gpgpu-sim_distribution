@@ -631,6 +631,9 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_collector_local_round_robin", OPT_BOOL,
                          &custom_collector_local_round_robin,
                          "Keep independent collector slot rotation per sub-core", "0");
+  option_parser_register(opp, "-custom_warp_swizzle", OPT_UINT32,
+                         &custom_warp_swizzle,
+                         "Fixed per-SM order: 0 legacy, 1 LRR, 2 LRR and instruction-buffer replenishment", "0");
   option_parser_register(opp, "-custom_collector_fair_dispatch", OPT_BOOL,
                          &custom_collector_fair_dispatch,
                          "Rotate all collector slots across fixed sub-cores", "0");

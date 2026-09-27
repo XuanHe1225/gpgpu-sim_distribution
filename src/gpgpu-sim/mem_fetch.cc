@@ -67,6 +67,9 @@ const bool custom_progress_bound = [] {
     auto *mf=static_cast<mem_fetch*>(data);
     custom_dram_progress::observations().network(mf->get_sid(),mf->get_access_type(),
       subnet,event,mf->get_data_size(),pnm_events::cycle(mf));
+    if(subnet==0 && mf->get_access_type()==GLOBAL_ACC_R && (event==0 || event==2))
+      custom_dram_progress::observations().pch_event(mf->get_tlx_addr().chip,
+          event/2,mf->get_data_size(),pnm_events::cycle(mf));
   };
   return true;
 }();

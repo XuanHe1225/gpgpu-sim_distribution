@@ -31,6 +31,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "dram.h"
+#include "custom_dram_progress.h"
 #include "pnm_memory_events.h"
 #include "dram_sched.h"
 #include "gpu-misc.h"
@@ -595,6 +596,7 @@ bool dram_t::issue_col_command(int j) {
       rwq->push(bk[j]->mrq);
       m_component.command(false);
       custom_region::observations().command(id,false,m_config->dram_atom_size);
+      custom_dram_progress::observations().pch_event(id,2,m_config->dram_atom_size,m_gpu->global_cycle());
       pnm_events::request("RD", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
                            bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
       bk[j]->mrq->txbytes += m_config->dram_atom_size;
@@ -634,6 +636,7 @@ bool dram_t::issue_col_command(int j) {
         rwq->push(bk[j]->mrq);
         m_component.command(true);
         custom_region::observations().command(id,true,m_config->dram_atom_size);
+        custom_dram_progress::observations().pch_event(id,3,m_config->dram_atom_size,m_gpu->global_cycle());
         pnm_events::request("WR", m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
                              bk[j]->mrq->data, "", 0, bk[j]->mrq->txbytes, n_cmd);
 

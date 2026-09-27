@@ -1,12 +1,14 @@
 #pragma once
 // Optional whole-launch observations. No queue, policy, or timing mutations.
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <functional>
 #include <map>
 #include <tuple>
 #include <utility>
+#include <vector>
 namespace custom_dram_progress {
 using U = unsigned long long;
 constexpr U bin_cycles = 10000;
@@ -17,6 +19,9 @@ using Key = std::tuple<U,unsigned,unsigned,unsigned,unsigned>;
 struct Value { U count=0, bytes=0; };
 struct Observations {
   std::map<Key,Value> bins;
+  // Core-cycle bins: injected reads, bytes, delivered reads, bytes, RD/WR bytes.
+  std::map<std::pair<U,unsigned>,std::array<U,6>> pch_bins;
+  std::map<unsigned,std::vector<std::array<U,4>>> first_loads;
   std::map<std::pair<unsigned,unsigned>,U> live;
   std::map<State,U> pending_states, state_since;
   void add(unsigned sid,unsigned type,unsigned kind,unsigned detail,U cycle,U count,U bytes=0) {
@@ -54,6 +59,18 @@ struct Observations {
   void network(unsigned sid,unsigned type,unsigned subnet,unsigned event,unsigned bytes,U cycle) {
     if(enabled_flag())add(sid,type,5,10*subnet+event,cycle,1,bytes);
   }
+  void pch_event(unsigned pch,unsigned stage,unsigned bytes,U cycle) {
+    if(!enabled_flag())return;
+    assert(stage<4);
+    auto &v=pch_bins[{cycle/bin_cycles,pch}];
+    if(stage<2){++v[2*stage];v[2*stage+1]+=bytes;}else v[stage+2]+=bytes;
+  }
+  void load_issue(unsigned sid,unsigned warp,U pc,U address,U cycle) {
+    if(!enabled_flag())return;
+    // ponytail: first 16 issues per SM suffice for startup; bins cover later progress.
+    auto &v=first_loads[sid];
+    if(v.size()<16)v.push_back({cycle,warp,pc,address});
+  }
   void print(U cycle) {
     if(!enabled_flag())return;
     for(const auto &p:pending_states)settle(p.first,cycle);
@@ -62,6 +79,17 @@ struct Observations {
       std::get<0>(p.first),std::get<1>(p.first),std::get<2>(p.first),std::get<3>(p.first),
       std::get<4>(p.first),p.second.count,p.second.bytes);
     for(const auto &p:live)std::printf("CUSTOM_PROGRESS_PENDING %u %u %llu\n",p.first.first,p.first.second,p.second);
+    for(const auto &p:pch_bins) {
+      std::printf("CUSTOM_WARP_PCH %llu %u",p.first.first,p.first.second);
+      for(U v:p.second)std::printf(" %llu",v);
+      std::printf("\n");
+    }
+    for(const auto &p:first_loads)for(unsigned i=0;i<p.second.size();++i) {
+      std::printf("CUSTOM_WARP_ISSUE %u %u",p.first,i);
+      for(U v:p.second[i])std::printf(" %llu",v);
+      std::printf("\n");
+    }
+    pch_bins.clear();first_loads.clear();
     bins.clear();
   }
 };
