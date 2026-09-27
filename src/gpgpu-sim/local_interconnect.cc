@@ -57,6 +57,13 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
       m_localinct_config.custom_icnt_perfect_fair_eligible;
   custom_icnt_perfect_request_source_rr =
       m_localinct_config.custom_icnt_perfect_request_source_rr;
+  custom_icnt_request_lookahead = m_localinct_config.custom_icnt_request_lookahead;
+  if (custom_icnt_request_lookahead &&
+      (custom_icnt_request_lookahead != 4 || custom_icnt_perfect_fair ||
+       custom_icnt_perfect_fair_eligible || custom_icnt_perfect_request_source_rr ||
+       m_localinct_config.arbiter_algo != PERFECT || m_localinct_config.subnets != 2 ||
+       n_shader == 0 || n_mem == 0))
+    throw std::invalid_argument("custom request lookahead requires depth 4 and exclusive local PERFECT");
   if (custom_icnt_perfect_request_source_rr &&
       (custom_icnt_perfect_fair || custom_icnt_perfect_fair_eligible ||
        m_localinct_config.arbiter_algo != PERFECT || m_localinct_config.subnets != 2 ||
@@ -241,6 +248,49 @@ void xbar_router::Advance() {
   }
 }
 
+bool xbar_router::custom_bypass_blocked_head(unsigned input) {
+  if (!custom_icnt_request_lookahead || router_type != REQ_NET) return false;
+  ++custom_lookahead.blocked_heads;
+  auto &queue = in_buffers[input];
+  const unsigned limit = std::min<unsigned>(custom_icnt_request_lookahead, queue.size());
+  for (unsigned index = 0; index < limit; ++index) {
+    ++custom_lookahead.examined;
+    const Packet candidate = queue.at(index);
+    // Nothing may cross an unclassified, atomic, async or other special op.
+    if (!candidate.sector.request_known) break;
+    if (!index || !candidate.sector.ordinary_read) continue;
+    bool ordered = true;
+    for (unsigned before = 0; before < index; ++before) {
+      const Packet &prior = queue.at(before);
+      if (prior.output_deviceID == candidate.output_deviceID ||
+          (prior.sector.shader == candidate.sector.shader &&
+           prior.sector.warp == candidate.sector.warp)) {
+        ordered = false;
+        break;
+      }
+    }
+    if (!ordered || !Has_Buffer_Out(candidate.output_deviceID, 1)) continue;
+    out_buffers[candidate.output_deviceID].push(candidate);
+    // The legacy depart helper observes front(), which is not this request.
+    assert(!custom_queue_census);
+    custom_dram_progress::network_packet(candidate.data, m_id, 1);
+    queue.erase(index);
+    ++custom_lookahead.bypasses;
+    ++custom_lookahead.positions[index];
+    // A few read-only witnesses make real-trace ordering and destination
+    // readiness auditable even in a deliberately censored prefix replay.
+    if (custom_lookahead.bypasses <= 8) {
+      const Packet &head = queue.front();
+      std::printf("CUSTOM_REQUEST_BYPASS tick=%llu input=%u position=%u head_dest=%u dest=%u head_warp=%u warp=%u inst=%llu head_address=%llu address=%llu\n",
+                  cycles, input, index, head.output_deviceID, candidate.output_deviceID,
+                  head.sector.warp, candidate.sector.warp, candidate.sector.instruction,
+                  head.sector.address, candidate.sector.address);
+    }
+    return true;
+  }
+  return false;
+}
+
 void xbar_router::Perfect_Advance() {
   if (custom_icnt_perfect_fair) {
     Perfect_Fair_Advance();
@@ -314,6 +364,7 @@ void xbar_router::Perfect_Advance() {
           stats.max_wait = std::max(stats.max_wait, ++stats.consecutive_wait);
         }
         custom_dram_progress::network_packet(_packet.data,m_id,3);
+        if (custom_bypass_blocked_head(node_id)) ++reqs;
       }
     } else if (custom_icnt_perfect_fair_eligible) {
       custom_legacy_stats[node_id].consecutive_wait = 0;
@@ -709,6 +760,12 @@ void LocalInterconnect::DisplayStats() const {
            i, net[i]->packets_num, net[i]->reqs_util, net[i]->cycles,
            net[i]->cycles_util, static_cast<unsigned>(net[i]->Busy()));
     net[i]->custom_transfers.print(i == REQ_NET ? "request_xbar" : "reply_xbar");
+    if (net[i]->custom_icnt_request_lookahead) {
+      const auto &s = net[i]->custom_lookahead;
+      printf("CUSTOM_REQUEST_LOOKAHEAD subnet=%u depth=%u blocked_heads=%llu examined=%llu bypasses=%llu position1=%llu position2=%llu position3=%llu\n",
+             i, net[i]->custom_icnt_request_lookahead, s.blocked_heads, s.examined,
+             s.bypasses, s.positions[1], s.positions[2], s.positions[3]);
+    }
     if (net[i]->custom_icnt_perfect_fair || net[i]->custom_icnt_perfect_fair_eligible) {
       const unsigned begin = i == REQ_NET ? 0 : n_shader;
       const unsigned end = i == REQ_NET ? n_shader : n_shader + n_mem;

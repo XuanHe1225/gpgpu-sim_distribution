@@ -51,6 +51,7 @@ struct inct_config {
   bool custom_icnt_perfect_fair = false;
   bool custom_icnt_perfect_fair_eligible = false;
   bool custom_icnt_perfect_request_source_rr = false;
+  unsigned custom_icnt_request_lookahead = 0;
   bool custom_icnt_sector_pack = false;
   unsigned custom_icnt_return_width = 1;
   // config for local interconnect
@@ -94,6 +95,10 @@ class xbar_router {
   unsigned long long in_buffer_util;
   unsigned long long packets_num;
   custom_sector_transfer::Counters custom_transfers;
+  struct LookaheadStats {
+    unsigned long long blocked_heads = 0, examined = 0, bypasses = 0;
+    unsigned long long positions[4] = {};
+  } custom_lookahead;
 
  private:
   std::unique_ptr<custom_icnt_queue::Census> custom_queue_census;
@@ -113,7 +118,13 @@ class xbar_router {
     unsigned output_deviceID;
     custom_sector_transfer::Sector sector;
   };
-  vector<queue<Packet> > in_buffers;
+  // Keep the std::queue interface and legacy path byte-for-byte compatible.
+  // Only the opt-in policy accesses/removes one of the first four entries.
+  struct InputQueue : public queue<Packet> {
+    const Packet &at(unsigned index) const { return this->c.at(index); }
+    void erase(unsigned index) { this->c.erase(this->c.begin() + index); }
+  };
+  vector<InputQueue> in_buffers;
   vector<queue<Packet> > out_buffers;
   unsigned _n_shader, _n_mem, total_nodes;
   unsigned in_buffer_limit, out_buffer_limit;
@@ -132,6 +143,8 @@ class xbar_router {
   bool custom_icnt_perfect_fair = false;
   bool custom_icnt_perfect_fair_eligible = false;
   bool custom_icnt_perfect_request_source_rr = false;
+  unsigned custom_icnt_request_lookahead = 0;
+  bool custom_bypass_blocked_head(unsigned input);
   // Tick-start head lists, sorted by input ID. No input FIFO tail is searched.
   vector<unsigned> custom_fair_head, custom_fair_tail, custom_fair_link;
   struct FairStats {

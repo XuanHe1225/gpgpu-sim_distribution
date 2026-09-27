@@ -162,6 +162,9 @@ void icnt_reg_options(class OptionParser* opp) {
                          "Interconnection network config file", "mesh");
 
   // parameters for local xbar
+  option_parser_register(opp, "-custom_icnt_request_lookahead", OPT_UINT32,
+                         &g_inct_config.custom_icnt_request_lookahead,
+                         "Independent ordinary read bypass within first 4 request entries (0 disables)", "0");
   option_parser_register(opp, "-custom_icnt_perfect_request_source_rr", OPT_BOOL,
                          &g_inct_config.custom_icnt_perfect_request_source_rr,
                          "Rotate only among shader source IDs in the PERFECT request subnet", "0");
@@ -200,6 +203,8 @@ void icnt_reg_options(class OptionParser* opp) {
 }
 
 void icnt_wrapper_init() {
+  if (g_inct_config.custom_icnt_request_lookahead && g_network_mode != LOCAL_XBAR)
+    throw std::invalid_argument("custom request lookahead requires local PERFECT interconnect");
   if (g_inct_config.custom_icnt_perfect_request_source_rr && g_network_mode != LOCAL_XBAR)
     throw std::invalid_argument("custom request source rotation requires local PERFECT interconnect");
   if ((g_inct_config.custom_icnt_perfect_fair ||

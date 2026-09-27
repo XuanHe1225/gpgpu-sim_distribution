@@ -96,6 +96,17 @@ class mem_fetch {
   bool custom_bypass_global_read() const { return custom_bypass_read; }
   custom_sector_transfer::Sector custom_transfer_info() const {
     custom_sector_transfer::Sector info;
+    if (m_inst && !m_inst->empty() && !m_inst->m_is_ldgsts &&
+        !custom_bypass_read && !isatomic() && !m_access.is_tma() &&
+        !m_inst->is_tma() && m_inst->space.get_type() == global_space &&
+        (m_type == READ_REQUEST || m_type == WRITE_REQUEST) &&
+        (m_access.get_type() == GLOBAL_ACC_R || m_access.get_type() == GLOBAL_ACC_W) &&
+        m_data_size == 32 && !(get_addr() & 31)) {
+      info.request_known = true;
+      info.ordinary_read = m_type == READ_REQUEST && m_inst->is_load() && !get_is_write();
+      info.address = get_addr(); info.instruction = m_inst->get_uid();
+      info.shader = m_sid; info.warp = m_wid;
+    }
     if (custom_bypass_read && (m_type == READ_REQUEST || m_type == READ_REPLY)) {
       info.eligible = true; info.address = get_addr();
       info.instruction = m_inst->get_uid(); info.shader = m_sid; info.warp = m_wid;

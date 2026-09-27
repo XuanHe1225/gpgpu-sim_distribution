@@ -7,6 +7,9 @@ namespace custom_sector_transfer {
 using U = unsigned long long;
 struct Sector {
   bool eligible = false;
+  // Separate from bypass-sector packing eligibility. Unknown operations form
+  // an ordering barrier for the optional request lookahead experiment.
+  bool request_known = false, ordinary_read = false;
   U address = 0, instruction = 0;
   unsigned shader = 0, warp = 0;
   unsigned bit() const { return 1u << ((address >> 5) & 3); }
