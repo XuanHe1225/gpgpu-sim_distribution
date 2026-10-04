@@ -520,6 +520,9 @@ memory_sub_partition::~memory_sub_partition() {
 }
 
 void memory_sub_partition::cache_cycle(unsigned cycle) {
+  custom_insight::observer().l2(m_gpu->gpu_sim_cycle+m_gpu->gpu_tot_sim_cycle,m_id,
+      m_icnt_L2_queue->get_length(),m_L2_dram_queue->get_length(),m_rop.size(),
+      m_icnt_L2_queue->full(),m_L2_dram_queue->full());
   if(custom_region::enabled_flag() && !custom_region::observations().probes.count(m_id)) {
     custom_region::observations().probes[m_id]=[this] {
       unsigned long long sectors=0,bytes=0;

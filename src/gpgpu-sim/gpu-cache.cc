@@ -600,7 +600,7 @@ bool mshr_table::full(new_addr_type block_addr) const {
 void mshr_table::add(new_addr_type block_addr, mem_fetch *mf) {
   auto prior = m_data.find(block_addr);
   if (prior != m_data.end() && !prior->second.m_list.empty()) {
-    if (pnm_events::sink())
+    if (pnm_events::sink() || custom_insight::enabled())
       pnm_events::request("merge", pnm_events::cycle(mf), mf, "mshr", prior->second.m_list.front()->get_request_uid(), block_addr);
   }
   m_data[block_addr].m_list.push_back(mf);

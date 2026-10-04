@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "mem_fetch.h"
+#include "custom_insight_observer.h"
 
 namespace pnm_events {
 unsigned long long cycle(mem_fetch *mf);
@@ -45,7 +46,9 @@ inline void request(const char *event, unsigned long long cycle, mem_fetch *mf,
                     const char *detail = "", unsigned related = 0,
                     unsigned long long aux = 0,
                     unsigned long long dram_cycle = 0) {
-  if (!sink() || !mf) return;
+  if (!mf) return;
+  custom_insight::observer().request(event, pnm_events::cycle(mf), mf, detail, dram_cycle);
+  if (!sink()) return;
   emit(event, cycle, &mf->get_inst(), mf->get_sid(), mf->get_request_uid(),
        mf->get_original_mf() ? mf->get_original_mf()->get_request_uid() : 0,
        related, mf->get_addr(), mf->get_data_size(),
@@ -54,6 +57,7 @@ inline void request(const char *event, unsigned long long cycle, mem_fetch *mf,
 }
 inline void instruction(const char *event, unsigned long long cycle,
                         const warp_inst_t &inst, unsigned sm, bool lanes) {
+  custom_insight::observer().instruction(event,cycle,inst,sm);
   if (!sink() || !(inst.is_load() || inst.is_store())) return;
   emit(event, cycle, &inst, sm, 0, 0, 0, 0, inst.data_size,
        inst.get_active_mask().to_ullong(), nullptr,

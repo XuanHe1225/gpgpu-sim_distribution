@@ -137,6 +137,11 @@ dram_req_t *frfcfs_scheduler::schedule(unsigned bank, unsigned curr_row) {
     m_current_last_row = m_last_write_row;
   }
 
+  if(custom_insight::enabled()) {
+    const auto found=m_current_bins[bank].find(curr_row);
+    custom_insight::observer().scheduler(m_dram->m_gpu->gpu_sim_cycle+m_dram->m_gpu->gpu_tot_sim_cycle,
+        m_dram->id,m_current_queue[bank].size(),found==m_current_bins[bank].end()?0:found->second.size());
+  }
   if (m_current_last_row[bank] == NULL) {
     if (m_current_queue[bank].empty()) return NULL;
 

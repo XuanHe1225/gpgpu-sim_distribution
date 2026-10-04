@@ -292,6 +292,7 @@ void dram_t::scheduler_fifo() {
   a ^= b;
 
 void dram_t::cycle() {
+  custom_insight::observer().mc(m_gpu->gpu_sim_cycle+m_gpu->gpu_tot_sim_cycle,id,que_length(),full(false));
   if (!returnq->full()) {
     dram_req_t *cmd = rwq->pop();
     if (cmd) {

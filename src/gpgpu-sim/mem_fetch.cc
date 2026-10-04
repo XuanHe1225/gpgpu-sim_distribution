@@ -199,6 +199,7 @@ mem_fetch::mem_fetch(const mem_access_t &access,
 }
 
 mem_fetch::~mem_fetch() {
+  custom_insight::observer().release(get_request_uid(),pnm_events::cycle(this));
   if (custom_async_path::enabled()) custom_async_path::observations().finish_request(get_request_uid(), pnm_events::cycle(this));
   custom_region::observations().destroyed(get_access_type(),m_access.is_write());
   if(custom_dram_progress::enabled_flag())
@@ -242,6 +243,8 @@ void mem_fetch::print(FILE *fp, bool print_inst) const {
 
 void mem_fetch::set_status(enum mem_fetch_status status,
                            unsigned long long cycle) {
+  if(status != m_status)
+    custom_insight::observer().state(this,status,pnm_events::cycle(this));
   // Cache tag timestamps may include the memcpy replacement-order offset.
   // Residence observes elapsed core time; retain the original status timestamp
   // below for existing simulator accounting.

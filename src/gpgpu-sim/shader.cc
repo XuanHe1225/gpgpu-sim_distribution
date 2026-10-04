@@ -2692,6 +2692,11 @@ bool ldst_unit::memory_cycle(warp_inst_t &inst,
       }
       const mem_access_t &access = inst.accessq_back();
       unsigned size = access.get_size() + control_size;
+      if (inst.is_load() && inst.space.is_global() && custom_insight::cap_full(m_sid)) {
+        custom_insight::observer().gate(m_gpu->gpu_sim_cycle+m_gpu->gpu_tot_sim_cycle);
+        stall_cond=ICNT_RC_FAIL;
+        break;
+      }
       // printf("Interconnect:Addr: %x, size=%d\n",access.get_addr(),size);
       if (m_memory_config->SST_mode &&
           (static_cast<sst_memory_interface *>(m_icnt)->full(

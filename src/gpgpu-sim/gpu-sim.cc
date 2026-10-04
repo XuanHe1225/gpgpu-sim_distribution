@@ -1,4 +1,5 @@
 #include "custom_async_path.h"
+#include "custom_insight_observer.h"
 #include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, George L. Yuan,
 // Ali Bakhoda, Andrew Turner, Ivan Sham, Vijay Kandiah, Nikos Hardavellas,
@@ -1752,6 +1753,7 @@ void gpgpu_sim::gpu_print_stat(unsigned long long streamID) {
   pnm_paths::observations().print();
   custom_async_path::observations().print();
   custom_sector_transfer::print();
+  custom_insight::observer().print(global_cycle());
   custom_region::observations().print();
   custom_dram_progress::observations().print(global_cycle());
   printf("kernel_stream_id = %llu\n", streamID);
@@ -2584,8 +2586,11 @@ void gpgpu_sim::perf_memcpy_to_gpu(size_t dst_start_addr, size_t count) {
     // 32
     //== 0);
 
-    for (unsigned counter = 0; counter < count; counter += 32) {
-      const size_t wr_addr = dst_start_addr + counter;
+    // Local scattering moves two halves of a sector independently. Visit both
+    // halves during prefill so the transformed allocation is completely filled.
+    const unsigned prefill_step=(custom_insight::settings().mode&1) ? 16 : 32;
+    for (unsigned counter = 0; counter < count; counter += prefill_step) {
+      const size_t wr_addr = custom_insight::transform(dst_start_addr + counter);
       addrdec_t raw_addr;
       mem_access_sector_mask_t mask;
       mask.set(wr_addr % 128 / 32);
