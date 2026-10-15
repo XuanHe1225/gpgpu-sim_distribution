@@ -177,6 +177,9 @@ void icnt_reg_options(class OptionParser* opp) {
   option_parser_register(opp, "-custom_icnt_sector_pack", OPT_BOOL,
                          &g_inct_config.custom_icnt_sector_pack,
                          "Group up to four same-line bypass read sectors in local PERFECT", "0");
+  option_parser_register(opp, "-custom_icnt_write_sector_pack", OPT_BOOL,
+                         &g_inct_config.custom_icnt_write_sector_pack,
+                         "Group adjacent same-instruction same-line global write sectors in local PERFECT", "0");
   option_parser_register(opp, "-custom_icnt_return_width", OPT_UINT32,
                          &g_inct_config.custom_icnt_return_width,
                          "Eligible sector responses per receive stage: 1 or experimental 4", "1");

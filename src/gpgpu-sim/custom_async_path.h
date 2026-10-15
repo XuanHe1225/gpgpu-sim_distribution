@@ -1,6 +1,7 @@
 // Read-only, bounded async loop observations. No queue or timing decisions.
 #ifndef CUSTOM_ASYNC_PATH_H
 #define CUSTOM_ASYNC_PATH_H
+#include "custom_component_target.h"
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -37,13 +38,22 @@ struct Row {
 };
 struct Request { size_t row; U inst; int state; U begin; };
 struct Span { U count = 0, sum = 0, max = 0; };
+struct Front {
+  std::array<U, 3> time{};
+  unsigned stage = 0;
+  U icnt_stalls = 0, coal_stalls = 0;
+  std::array<U, 3> collector_waits{};
+  struct Block { U count = 0, first = 0, last = 0; };
+  std::map<U, Block> collector_blocks;
+};
 struct Observations {
   std::vector<Row> rows;
   std::map<std::pair<U,U>,size_t> current;
   std::unordered_map<U,size_t> instructions;
   std::unordered_map<U,Request> requests;
+  std::unordered_map<U,Front> fronts;
   std::map<std::tuple<U,U,int,int>,Span> residence;
-  U errors = 0;
+  U errors = 0, inactive = 0;
   static bool detailed(U iteration) {
     return iteration == 0 || iteration == 1024 || iteration == 2047;
   }
@@ -81,12 +91,70 @@ struct Observations {
     } else if (kind == 2) row.time[WAIT_ENTER] = cycle;
     else if (kind == 3) row.time[BARRIER_ARRIVE] = cycle;
   }
-  void complete(U uid, U cycle) {
+  // Observe only already-selected async instructions; never alter admission.
+  bool collector_active(U sid) const {
+    if (!enabled()) return false;
+    auto it = current.find({sid, 0});
+    if (it == current.end()) return false;
+    const auto &r = rows[it->second];
+    return detailed(r.iteration) && custom_component::selected_cta(r.x, r.y, r.z);
+  }
+  void front_collector(U uid, bool operands_ready, U blocker, U cycle) {
+    if (!enabled()) return;
+    auto it = instructions.find(uid);
+    if (it == instructions.end()) return;
+    const auto &r = rows[it->second];
+    if (r.warp || !detailed(r.iteration) ||
+        !custom_component::selected_cta(r.x, r.y, r.z)) return;
+    auto &f = fronts[uid];
+    if (f.stage) { ++errors; return; }
+    ++f.collector_waits[!operands_ready ? 0 : blocker ? 1 : 2];
+    if (operands_ready && blocker) {
+      auto &b = f.collector_blocks[blocker];
+      if (!b.count++) b.first = cycle;
+      b.last = cycle;
+    }
+  }
+  void front_stage(U uid, unsigned stage, U cycle) {
+    if (!enabled() || !instructions.count(uid)) return;
+    auto &f = fronts[uid];
+    if (stage == 3 && f.stage == 3) return;
+    if (stage != f.stage + 1 || stage > 3 ||
+        (f.stage && cycle < f.time[f.stage - 1])) { ++errors; return; }
+    f.time[stage - 1] = cycle; f.stage = stage;
+  }
+  void front_stall(U uid, bool icnt) {
+    if (!enabled() || !instructions.count(uid)) return;
+    auto it = fronts.find(uid);
+    if (it == fronts.end() || it->second.stage != 3) { ++errors; return; }
+    if (icnt) ++it->second.icnt_stalls;
+    else ++it->second.coal_stalls;
+  }
+  void complete(U uid, U cycle, bool predicated_off) {
     if (!enabled()) return;
     auto it = instructions.find(uid); if (it == instructions.end()) return;
     auto &row = rows[it->second]; ++row.completed;
+    if (predicated_off) ++inactive;
     row.time[LAST_COMPLETE] = std::max(row.time[LAST_COMPLETE],cycle);
     if (detailed(row.iteration)) std::printf("CUSTOM_ASYNC_COMPLETE %llu %llu\n",uid,cycle);
+    auto front = fronts.find(uid);
+    if (front != fronts.end()) {
+      const auto &f = front->second;
+      // Zero active lanes skip memory_cycle service but still complete at LSU.
+      const unsigned last = predicated_off ? 2 : 3;
+      if (f.stage != last || cycle < f.time[last - 1]) ++errors;
+      if (detailed(row.iteration))
+        std::printf("CUSTOM_ASYNC_FRONT %llu %llu %llu %llu %llu %llu\n",
+            uid, f.time[0], f.time[1], f.time[2], f.icnt_stalls, f.coal_stalls);
+      if (f.collector_waits[0] || f.collector_waits[1] || f.collector_waits[2]) {
+        std::printf("CUSTOM_ASYNC_COLLECTOR %llu %llu %llu %llu\n", uid,
+                    f.collector_waits[0], f.collector_waits[1], f.collector_waits[2]);
+        for (const auto &item : f.collector_blocks)
+          std::printf("CUSTOM_ASYNC_COLLECTOR_BLOCK %llu %llu %llu %llu %llu\n",
+              uid, item.first, item.second.count, item.second.first, item.second.last);
+      }
+      fronts.erase(front);
+    }
     instructions.erase(it);
   }
   void wait_release(U sid, U warp, U cycle) {
@@ -149,9 +217,10 @@ struct Observations {
       std::printf("CUSTOM_ASYNC_RESIDENCE %llu %llu %d %d %llu %llu %llu\n",
           std::get<0>(kv.first),std::get<1>(kv.first),std::get<2>(kv.first),
           std::get<3>(kv.first),kv.second.count,kv.second.sum,kv.second.max);
+    std::printf("CUSTOM_ASYNC_INACTIVE %llu\n", inactive);
     std::printf("CUSTOM_ASYNC_PENDING %llu %llu %llu\n",(U)instructions.size(),(U)requests.size(),errors);
     rows.clear(); current.clear(); instructions.clear(); requests.clear();
-    residence.clear(); errors = 0;
+    residence.clear(); fronts.clear(); errors = 0; inactive = 0;
   }
 };
 inline Observations &observations() { static Observations value; return value; }

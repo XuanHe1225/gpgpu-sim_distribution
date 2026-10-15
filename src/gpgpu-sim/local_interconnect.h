@@ -53,6 +53,7 @@ struct inct_config {
   bool custom_icnt_perfect_request_source_rr = false;
   unsigned custom_icnt_request_lookahead = 0;
   bool custom_icnt_sector_pack = false;
+  bool custom_icnt_write_sector_pack = false;
   unsigned custom_icnt_return_width = 1;
   // config for local interconnect
   unsigned in_buffer_limit;
@@ -95,6 +96,7 @@ class xbar_router {
   unsigned long long in_buffer_util;
   unsigned long long packets_num;
   custom_sector_transfer::Counters custom_transfers;
+  custom_sector_transfer::Counters custom_write_transfers;
   struct LookaheadStats {
     unsigned long long blocked_heads = 0, examined = 0, bypasses = 0;
     unsigned long long positions[4] = {};
@@ -140,6 +142,7 @@ class xbar_router {
   unsigned grant_cycles_count;
   bool custom_icnt_round_robin;
   bool custom_icnt_sector_pack = false;
+  bool custom_icnt_write_sector_pack = false;
   bool custom_icnt_perfect_fair = false;
   bool custom_icnt_perfect_fair_eligible = false;
   bool custom_icnt_perfect_request_source_rr = false;

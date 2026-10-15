@@ -9,13 +9,14 @@ struct Sector {
   bool eligible = false;
   // Separate from bypass-sector packing eligibility. Unknown operations form
   // an ordering barrier for the optional request lookahead experiment.
-  bool request_known = false, ordinary_read = false;
+  bool request_known = false, ordinary_read = false, ordinary_write = false;
   U address = 0, instruction = 0;
   unsigned shader = 0, warp = 0;
   unsigned bit() const { return 1u << ((address >> 5) & 3); }
   bool valid() const { return eligible && !(address & 31); }
   bool matches(const Sector &head, unsigned used) const {
-    return valid() && head.valid() && instruction == head.instruction &&
+    return valid() && head.valid() && ordinary_write == head.ordinary_write &&
+           instruction == head.instruction &&
            shader == head.shader && warp == head.warp &&
            (address >> 7) == (head.address >> 7) && !(used & bit());
   }
@@ -33,9 +34,11 @@ struct Counters {
 };
 inline Counters &icnt_receive() { static Counters c; return c; }
 inline Counters &lsu_receive() { static Counters c; return c; }
+inline Counters &l1_write_send() { static Counters c; return c; }
 inline void print() {
   icnt_receive().print("icnt_to_cluster");
   lsu_receive().print("cluster_to_lsu");
+  if (l1_write_send().sectors) l1_write_send().print("l1_write_to_icnt");
 }
 }  // namespace custom_sector_transfer
 #endif

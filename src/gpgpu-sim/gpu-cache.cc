@@ -31,8 +31,10 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "gpu-cache.h"
+#include "pnm_component_diagnostics.h"
 #include "pnm_memory_events.h"
 #include "custom_region_observation.h"
+#include "custom_l1_observation.h"
 #include <assert.h>
 #include <cstdint>
 #include "gpu-sim.h"
@@ -1263,14 +1265,34 @@ bool baseline_cache::bandwidth_management::fill_port_free() const {
 }
 
 /// Sends next request to lower level of memory
-void baseline_cache::cycle() {
-  if (!m_miss_queue.empty()) {
+void baseline_cache::cycle(bool pack_l1_writes) {
+  if (pack_l1_writes) assert(m_level == L1_GPU_CACHE);
+  custom_sector_transfer::Sector head;
+  unsigned used = 0, destination = 0, writes = 0;
+  for (unsigned n = 0; n < (pack_l1_writes ? 4u : 1u) && !m_miss_queue.empty(); ++n) {
     mem_fetch *mf = m_miss_queue.front();
-    if (!m_memport->full(mf->size(), mf->get_is_write())) {
-      m_miss_queue.pop_front();
-      m_memport->push(mf);
+    auto info = pack_l1_writes ? mf->custom_transfer_info() : custom_sector_transfer::Sector{};
+    info.eligible = info.request_known && info.ordinary_write;
+    if (n && (!info.matches(head, used) || mf->get_sub_partition_id() != destination)) break;
+    const bool output_full = m_memport->full(mf->size(), mf->get_is_write());
+    if (m_level == L1_GPU_CACHE && custom_l1_queue::active(mf->get_sid(), m_gpu->global_cycle()))
+      custom_l1_queue::record("egress", mf->get_sid(), m_gpu->global_cycle(),
+          {mf->get_request_uid(), mf->get_inst().get_uid(), mf->get_pc(),
+           mf->get_wid(), mf->get_addr(), mf->get_sub_partition_id(),
+           m_miss_queue.size(), output_full, mf->get_is_write()});
+    if (output_full) break;
+    if (!n) {
+      head = info;
+      if (info.valid()) destination = mf->get_sub_partition_id();
     }
+    used |= info.bit();
+    if (info.valid()) ++writes;
+    // Keep each original object, FIFO position, capacity check and write ACK.
+    m_miss_queue.pop_front();
+    m_memport->push(mf);
+    if (!info.valid()) break;
   }
+  if (pack_l1_writes) custom_sector_transfer::l1_write_send().add(writes);
   bool data_port_busy = !m_bandwidth_management.data_port_free();
   bool fill_port_busy = !m_bandwidth_management.fill_port_free();
   m_stats.sample_cache_port_utility(data_port_busy, fill_port_busy);
@@ -1896,6 +1918,15 @@ enum cache_request_status data_cache::rd_miss_base(
     new_addr_type addr, unsigned cache_index, mem_fetch *mf, unsigned time,
     std::list<cache_event> &events, enum cache_request_status status) {
   if (miss_queue_full(1)) {
+    if (m_level == L2_GPU_CACHE && pnm_components::enabled()) {
+      const new_addr_type pending = m_config.mshr_addr(mf->get_addr());
+      std::printf("CUSTOM_L2_MERGE_GATE %llu %llu %u %u %u %d %u %u %zu %llx\n",
+                  m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle,
+                  mf->get_request_uid(), mf->get_sid(), mf->get_wid(),
+                  mf->get_tlx_addr().sub_partition, int(status),
+                  unsigned(m_mshrs.probe(pending)), unsigned(m_mshrs.full(pending)),
+                  m_miss_queue.size(), (unsigned long long)pending);
+    }
     // cannot handle request this cycle
     // (might need to generate two requests)
     m_stats.inc_fail_stats(mf->get_access_type(), MISS_QUEUE_FULL,

@@ -104,6 +104,7 @@ class mem_fetch {
         m_data_size == 32 && !(get_addr() & 31)) {
       info.request_known = true;
       info.ordinary_read = m_type == READ_REQUEST && m_inst->is_load() && !get_is_write();
+      info.ordinary_write = m_type == WRITE_REQUEST && m_inst->is_store() && get_is_write();
       info.address = get_addr(); info.instruction = m_inst->get_uid();
       info.shader = m_sid; info.warp = m_wid;
     }

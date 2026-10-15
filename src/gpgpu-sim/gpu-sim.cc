@@ -644,6 +644,12 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-custom_l1_completion_accounting", OPT_BOOL,
                          &custom_l1_completion_accounting,
                          "Retire an L1-hit load once after all destinations release", "0");
+  option_parser_register(opp, "-custom_l1_write_sector_pack", OPT_BOOL,
+                         &custom_l1_write_sector_pack,
+                         "Send adjacent same-instruction same-line global write sectors from L1", "0");
+  option_parser_register(opp, "-custom_l1_bank_round_robin", OPT_BOOL,
+                         &custom_l1_bank_round_robin,
+                         "Start L1 bank probes after the last accepted bank", "0");
   option_parser_register(opp, "-custom_dram_progress_observation", OPT_BOOL,
                          &custom_dram_progress::enabled_flag(),
                          "Read-only whole-launch per-SM memory progress", "0");

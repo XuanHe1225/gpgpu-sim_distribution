@@ -1,4 +1,6 @@
 #include "custom_async_path.h"
+#include "custom_component_target.h"
+#include "custom_l1_observation.h"
 #include "custom_dram_progress.h"
 #include "pnm_path_diagnostics.h"
 // Copyright (c) 2009-2021, Tor M. Aamodt, Wilson W.L. Fung, Ali Bakhoda,
@@ -1106,9 +1108,10 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
   if (pnm_components::enabled()) {
     const auto &inst = **pipe_reg;
     auto cta = inst.get_cuda_cta_id();
-    if (!cta.x && !cta.y && !cta.z && inst.op == BARRIER_OP)
+    const bool selected = custom_component::selected_cta(cta.x, cta.y, cta.z);
+    if (selected && inst.op == BARRIER_OP)
       custom_timing::observations().barrier(m_warp[warp_id]->get_kernel_info()->get_uid(), warp_id, inst.pc, m_gpu->global_cycle());
-    if (!cta.x && !cta.y && !cta.z && !warp_id) {
+    if (selected && !warp_id) {
       auto &timing = custom_timing::observations();
       timing.issue(m_sid, warp_id, inst.get_uid(),
           m_warp[warp_id]->get_kernel_info()->get_uid(), inst.pc, m_gpu->global_cycle());
@@ -1129,7 +1132,7 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
     bool fixed = inst.op == ALU_OP || inst.op == INTP_OP || inst.op == SP_OP ||
                  inst.op == DP_OP || inst.op == SFU_OP || inst.op == TENSOR_CORE_OP ||
                  inst.op >= SPEC_UNIT_START_ID;
-    if (fixed && !cta.x && !cta.y && !cta.z && !warp_id)
+    if (fixed && selected && !warp_id)
       pnm_paths::observations().issue(inst.get_uid(), m_warp[warp_id]->get_kernel_info()->get_uid(),
                                      inst.pc, m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
   }
@@ -2241,7 +2244,7 @@ void shader_core_ctx::unset_depbar(const warp_inst_t &inst) {
 }
 
 void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
-  if (inst.m_is_ldgsts) custom_async_path::observations().complete(inst.get_uid(), m_gpu->global_cycle());
+  if (inst.m_is_ldgsts) custom_async_path::observations().complete(inst.get_uid(), m_gpu->global_cycle(), inst.active_count() == 0);
   custom_timing::observations().finish(inst.get_uid(), m_gpu->global_cycle());
   pnm_events::instruction("complete", m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                           inst, m_sid, false);
@@ -2459,6 +2462,18 @@ mem_stage_stall_type ldst_unit::process_memory_access_queue_l1cache(
       unsigned bank_id = m_config->m_L1D_config.set_bank(mf->get_addr());
       assert(bank_id < m_config->m_L1D_config.l1_banks);
 
+      if (custom_l1_queue::active(m_sid, m_core->get_gpu()->global_cycle())) {
+        const auto &queue = l1_latency_queue[bank_id];
+        unsigned occupied = 0;
+        for (const auto *entry : queue) occupied += entry != nullptr;
+        custom_l1_queue::record("intake", m_sid, m_core->get_gpu()->global_cycle(),
+            {inst.get_uid(), inst.pc, inst.warp_id(), mf->get_request_uid(),
+             mf->get_addr(), bank_id, occupied,
+             queue.front() ? queue.front()->get_request_uid() : 0,
+             queue.back() ? queue.back()->get_request_uid() : 0,
+             queue.back() != nullptr, inst.accessq_count()});
+      }
+
       if ((l1_latency_queue[bank_id][m_config->m_L1D_config.l1_latency - 1]) ==
           NULL) {
         l1_latency_queue[bank_id][m_config->m_L1D_config.l1_latency - 1] = mf;
@@ -2502,7 +2517,10 @@ mem_stage_stall_type ldst_unit::process_memory_access_queue_l1cache(
 }
 
 void ldst_unit::L1_latency_queue_cycle() {
-  for (unsigned int j = 0; j < m_config->m_L1D_config.l1_banks; j++) {
+  const unsigned banks = m_config->m_L1D_config.l1_banks;
+  const unsigned start = m_config->custom_l1_bank_round_robin ? m_next_l1_bank : 0;
+  for (unsigned n = 0; n < banks; n++) {
+    const unsigned j = (start + n) % banks;
     if ((l1_latency_queue[j][0]) != NULL) {
       mem_fetch *mf_next = l1_latency_queue[j][0];
       std::list<cache_event> events;
@@ -2515,6 +2533,17 @@ void ldst_unit::L1_latency_queue_cycle() {
 
       bool write_sent = was_write_sent(events);
       bool read_sent = was_read_sent(events);
+
+      if (custom_l1_queue::active(m_sid, m_core->get_gpu()->global_cycle()))
+        custom_l1_queue::record("probe", m_sid, m_core->get_gpu()->global_cycle(),
+            {mf_next->get_request_uid(), mf_next->get_inst().get_uid(), mf_next->get_pc(),
+             mf_next->get_wid(), mf_next->get_addr(), j, unsigned(status),
+             m_L1D->custom_miss_queue_size(), write_sent, read_sent,
+             unsigned(mf_next->get_access_type())});
+
+      // Retain priority while stalled; rotate only after a bank makes progress.
+      if (m_config->custom_l1_bank_round_robin && status != RESERVATION_FAIL)
+        m_next_l1_bank = (j + 1) % banks;
 
       if (status == HIT) {
         assert(!read_sent);
@@ -2666,6 +2695,7 @@ bool ldst_unit::memory_cycle(warp_inst_t &inst,
   if (inst.active_count() == 0) return true;
   if (inst.accessq_empty()) return true;
 
+  custom_async_path::observations().front_stage(inst.get_uid(), 3, m_core->get_gpu()->global_cycle());
   mem_stage_stall_type stall_cond = NO_RC_FAIL;
   const mem_access_t &access = inst.accessq_back();
   LDST_DPRINTF(
@@ -2740,6 +2770,8 @@ bool ldst_unit::memory_cycle(warp_inst_t &inst,
   if (!inst.accessq_empty() && stall_cond == NO_RC_FAIL)
     stall_cond = COAL_STALL;
   if (stall_cond != NO_RC_FAIL) {
+    if (stall_cond == ICNT_RC_FAIL || stall_cond == COAL_STALL)
+      custom_async_path::observations().front_stall(inst.get_uid(), stall_cond == ICNT_RC_FAIL);
     stall_reason = stall_cond;
     bool iswrite = inst.is_store();
     if (inst.space.is_local())
@@ -3003,6 +3035,7 @@ void pipelined_simd_unit::issue(register_set &source_reg) {
       m_config->sub_core_model && this->is_issue_partitioned();
   warp_inst_t **ready_reg =
       source_reg.get_ready(partition_issue, m_issue_reg_id);
+  custom_async_path::observations().front_stage((*ready_reg)->get_uid(), 2, m_core->get_gpu()->global_cycle());
   if (pnm_components::enabled()) {
     const warp_inst_t &inst = **ready_reg;
     custom_timing::observations().mark(inst.get_uid(), 4, m_core->get_gpu()->global_cycle());
@@ -3061,6 +3094,7 @@ void ldst_unit::init(mem_fetch_interface *icnt,
       WB_CLIENT_MAX;  // = shared memory, global/local (uncached), L1D, L1T,
                       // L1C, fence, syncs
   m_writeback_arb = 0;
+  m_next_l1_bank = 0;
   m_last_inst_gpu_sim_cycle = 0;
   m_last_inst_gpu_tot_sim_cycle = 0;
   m_fence_async = false;
@@ -3712,7 +3746,7 @@ void ldst_unit::cycle() {
   m_L1T->cycle();
   m_L1C->cycle();
   if (m_L1D) {
-    m_L1D->cycle();
+    m_L1D->cycle(m_config->custom_l1_write_sector_pack);
     if (m_config->m_L1D_config.l1_latency > 0) L1_latency_queue_cycle();
   }
 
@@ -3728,8 +3762,8 @@ void ldst_unit::cycle() {
 
   if (!done) {  // log stall types and return
     assert(rc_fail != NO_RC_FAIL);
-    if (pnm_components::enabled() && !pipe_reg.get_cuda_cta_id().x &&
-        !pipe_reg.get_cuda_cta_id().y && !pipe_reg.get_cuda_cta_id().z && !pipe_reg.warp_id())
+    const auto cta = pipe_reg.get_cuda_cta_id();
+    if (pnm_components::enabled() && custom_component::selected_cta(cta.x, cta.y, cta.z) && !pipe_reg.warp_id())
       ++pnm_paths::observations().lsu[{m_core->get_kernel()->get_uid(), m_sid, pipe_reg.pc, rc_fail}];
     custom_region::observations().count(0,15,m_sid,
         (custom_region::U(pipe_reg.warp_id())<<16)|(unsigned(type)<<8)|unsigned(rc_fail));
@@ -5476,6 +5510,9 @@ bool opndcoll_rfu_t::writeback(warp_inst_t &inst) {
 }
 
 void opndcoll_rfu_t::dispatch_ready_cu() {
+  if (custom_async_path::observations().collector_active(m_shader->get_sid()))
+    for (const auto *cu : m_cu)
+      cu->observe_async_wait(m_shader->get_gpu()->global_cycle());
   for (unsigned p = 0; p < m_dispatch_units.size(); ++p) {
     dispatch_unit_t &du = m_dispatch_units[p];
     collector_unit_t *cu = du.find_ready();
@@ -5502,6 +5539,7 @@ void opndcoll_rfu_t::dispatch_ready_cu() {
       }
       custom_timing::observations().mark(cu->instruction_uid(), 3, m_shader->get_gpu()->global_cycle());
     pnm_paths::observations().stage(cu->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
+      custom_async_path::observations().front_stage(cu->instruction_uid(), 1, m_shader->get_gpu()->global_cycle());
       cu->dispatch();
     }
   }
@@ -5623,6 +5661,20 @@ void opndcoll_rfu_t::allocate_reads() {
 bool opndcoll_rfu_t::collector_unit_t::ready() const {
   return (!m_free) && m_not_ready.none() &&
          (*m_output_register).has_free(m_sub_core_model, m_reg_id);
+}
+
+void opndcoll_rfu_t::collector_unit_t::observe_async_wait(
+    unsigned long long cycle) const {
+  if (m_free) return;
+  unsigned long long blocker = 0;
+  if (m_not_ready.none() &&
+      !m_output_register->has_free(m_sub_core_model, m_reg_id)) {
+    auto ready = m_output_register->get_ready(m_sub_core_model, m_reg_id);
+    assert(ready && !(*ready)->empty());
+    blocker = (*ready)->get_uid();
+  }
+  custom_async_path::observations().front_collector(m_warp->get_uid(),
+      m_not_ready.none(), blocker, cycle);
 }
 
 void opndcoll_rfu_t::collector_unit_t::dump(
@@ -6226,6 +6278,7 @@ void opndcoll_simple_t::step() {
       }
       if (out->has_free(sub_core_model, reg_id)) {
         in->move_out_to(sub_core_model, reg_id, m_swap_buffer);
+        custom_async_path::observations().front_stage(m_swap_buffer->get_uid(), 1, m_shader->get_gpu()->global_cycle());
         pnm_paths::observations().stage(m_swap_buffer->get_uid(), 1, m_shader->get_gpu()->global_cycle());
         out->move_in(sub_core_model, reg_id, m_swap_buffer);
       }

@@ -1333,7 +1333,8 @@ class baseline_cache : public cache_t {
                                            unsigned time,
                                            std::list<cache_event> &events) = 0;
   /// Sends next request to lower level of memory
-  void cycle();
+  void cycle(bool pack_l1_writes = false);
+  unsigned custom_miss_queue_size() const { return m_miss_queue.size(); }
   /// Interface for response from lower memory level (model bandwidth
   /// restictions in caller)
   void fill(mem_fetch *mf, unsigned time);

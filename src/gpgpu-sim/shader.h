@@ -1356,6 +1356,7 @@ class opndcoll_rfu_t
     }
     // accessors
     bool ready() const;
+    void observe_async_wait(unsigned long long cycle) const;
     bool operands_ready() const { return !m_free && m_not_ready.none(); }
     const op_t *get_operands() const { return m_src_op; }
     void dump(FILE *fp, const shader_core_ctx *shader) const;
@@ -2133,6 +2134,7 @@ class ldst_unit : public pipelined_simd_unit {
   unsigned long long m_last_inst_gpu_tot_sim_cycle;
 
   std::vector<std::deque<mem_fetch *>> l1_latency_queue;
+  unsigned m_next_l1_bank;
   void L1_latency_queue_cycle();
 
   // For fence
@@ -2316,6 +2318,8 @@ class shader_core_config : public core_config {
   bool custom_scalar_result_forwarding;
   bool custom_scalar_operand_overlap;
   bool custom_l1_completion_accounting;
+  bool custom_l1_write_sector_pack;
+  bool custom_l1_bank_round_robin;
   bool pnm_simd_ready_boundary;
   bool custom_collector_fair_dispatch;
   bool custom_collector_local_round_robin;
@@ -3515,6 +3519,8 @@ class perfect_memory_interface : public mem_fetch_interface {
     if (mf && mf->isatomic())
       mf->do_atomic();  // execute atomic inside the "memory subsystem"
     m_core->inc_simt_to_mem(mf->get_num_flits(true));
+    // Preserve read-return classification even when ideal memory bypasses DRAM.
+    if (mf->get_type() == READ_REQUEST) mf->set_reply();
     m_cluster->push_response_fifo(mf);
   }
 

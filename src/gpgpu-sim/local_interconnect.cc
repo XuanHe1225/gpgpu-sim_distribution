@@ -52,6 +52,12 @@ xbar_router::xbar_router(unsigned router_id, enum Interconnect_type m_type,
   grant_cycles = m_localinct_config.grant_cycles;
   custom_icnt_round_robin = m_localinct_config.custom_icnt_round_robin;
   custom_icnt_sector_pack = m_localinct_config.custom_icnt_sector_pack;
+  custom_icnt_write_sector_pack = m_localinct_config.custom_icnt_write_sector_pack;
+  if (custom_icnt_write_sector_pack &&
+      (!custom_icnt_sector_pack || m_localinct_config.arbiter_algo != PERFECT ||
+       m_localinct_config.subnets != 2 || m_localinct_config.custom_icnt_request_lookahead ||
+       m_localinct_config.custom_icnt_perfect_fair || m_localinct_config.custom_icnt_perfect_fair_eligible))
+    throw std::invalid_argument("write sector packing requires ordinary local PERFECT with read packing");
   custom_icnt_perfect_fair = m_localinct_config.custom_icnt_perfect_fair;
   custom_icnt_perfect_fair_eligible =
       m_localinct_config.custom_icnt_perfect_fair_eligible;
@@ -137,7 +143,10 @@ void xbar_router::Push(unsigned input_deviceID, unsigned output_deviceID,
     assert(output_deviceID < total_nodes);
     assert((output_deviceID >= _n_shader) == (router_type == REQ_NET));
   }
-  in_buffers[input_deviceID].push(Packet(data, output_deviceID, sector));
+  auto info = sector;
+  if (custom_icnt_write_sector_pack && router_type == REQ_NET &&
+      info.request_known && info.ordinary_write) info.eligible = true;
+  in_buffers[input_deviceID].push(Packet(data, output_deviceID, info));
   packets_num++;
   custom_dram_progress::network_packet(data,m_id,0);
   if(custom_queue_census) {
@@ -349,7 +358,8 @@ void xbar_router::Perfect_Advance() {
             used |= next.sector.bit(); ++sectors; ++reqs; ++transferred;
           }
         }
-        custom_transfers.add(sectors);
+        if (_packet.sector.ordinary_write) custom_write_transfers.add(sectors);
+        else custom_transfers.add(sectors);
         if (custom_icnt_perfect_fair_eligible) {
           auto &stats = custom_legacy_stats[node_id];
           ++stats.grants;
@@ -444,7 +454,8 @@ void xbar_router::Perfect_Fair_Advance() {
             ++sectors; ++transferred;
           }
         }
-        custom_transfers.add(sectors);
+        if (packet.sector.ordinary_write) custom_write_transfers.add(sectors);
+        else custom_transfers.add(sectors);
         reqs += transferred;
         ++stats.grants;
         stats.sectors += transferred;
@@ -760,6 +771,8 @@ void LocalInterconnect::DisplayStats() const {
            i, net[i]->packets_num, net[i]->reqs_util, net[i]->cycles,
            net[i]->cycles_util, static_cast<unsigned>(net[i]->Busy()));
     net[i]->custom_transfers.print(i == REQ_NET ? "request_xbar" : "reply_xbar");
+    if (i == REQ_NET && net[i]->custom_icnt_write_sector_pack)
+      net[i]->custom_write_transfers.print("write_request_xbar");
     if (net[i]->custom_icnt_request_lookahead) {
       const auto &s = net[i]->custom_lookahead;
       printf("CUSTOM_REQUEST_LOOKAHEAD subnet=%u depth=%u blocked_heads=%llu examined=%llu bypasses=%llu position1=%llu position2=%llu position3=%llu\n",
